@@ -1,0 +1,17 @@
+{
+  "name": "clearvoice",
+  "version": "0.1.0",
+  "description": "Local-first browser audio capture, streaming processing, and AI transcription.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite build --watch --mode development",
+    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.0.308",
+    "@types/node": "^22.13.9",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.0"
+  }
+}

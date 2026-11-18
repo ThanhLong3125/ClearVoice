@@ -1,0 +1,28 @@
+{
+  "manifest_version": 3,
+  "name": "ClearVoice",
+  "version": "0.1.0",
+  "description": "Local-first browser tab audio capture, streaming processing, and AI transcription.",
+  "permissions": [
+    "tabCapture",
+    "offscreen",
+    "storage",
+    "activeTab"
+  ],
+  "action": {
+    "default_popup": "src/popup/index.html",
+    "default_title": "ClearVoice"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

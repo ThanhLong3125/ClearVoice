@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ClearVoice</title>
+  <link rel="stylesheet" href="./popup.css" />
+</head>
+<body>
+  <div class="header">
+    <h1 class="title">ClearVoice</h1>
+    <span class="version">v0.1.0 (MVP)</span>
+  </div>
+
+  <div class="card">
+    <div class="status-row">
+      <div id="statusDot" class="status-dot idle"></div>
+      <span id="statusText">Trạng thái: Chưa hoạt động</span>
+    </div>
+    <div id="errorMsg" class="error-msg" style="display: none;"></div>
+  </div>
+
+  <div class="controls">
+    <button id="btnStart" class="btn btn-primary">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+        <polygon points="5 3 19 12 5 21 5 3"></polygon>
+      </svg>
+      Bắt đầu thu âm Tab
+    </button>
+    <button id="btnStop" class="btn btn-danger" disabled>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+        <rect x="6" y="6" width="12" height="12"></rect>
+      </svg>
+      Dừng thu âm
+    </button>
+  </div>
+
+  <div class="footer">
+    Local-first AI Subtitles
+  </div>
+
+  <script type="module" src="./popup.ts"></script>
+</body>
+</html>
