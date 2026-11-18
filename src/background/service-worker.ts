@@ -125,6 +125,13 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendRe
       sendResponse({ success: true });
       break;
 
+    case "AUDIO_VOLUME":
+      // Broadcast live volume to active tab's overlay
+      if (activeTabId) {
+        chrome.tabs.sendMessage(activeTabId, message).catch(() => {});
+      }
+      break;
+
     case "TRANSCRIPT_UPDATE":
       // Broadcast transcript to active tab's content script
       if (activeTabId) {

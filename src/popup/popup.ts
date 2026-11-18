@@ -5,6 +5,9 @@ const btnStop = document.getElementById("btnStop") as HTMLButtonElement;
 const statusDot = document.getElementById("statusDot") as HTMLDivElement;
 const statusText = document.getElementById("statusText") as HTMLSpanElement;
 const errorMsg = document.getElementById("errorMsg") as HTMLDivElement;
+const volumeContainer = document.getElementById("volumeContainer") as HTMLDivElement;
+const volumeBar = document.getElementById("volumeBar") as HTMLDivElement;
+const volumePercent = document.getElementById("volumePercent") as HTMLSpanElement;
 
 function updateUI(state: CaptureState, error?: string): void {
   statusDot.className = `status-dot ${state}`;
@@ -18,27 +21,42 @@ function updateUI(state: CaptureState, error?: string): void {
       statusText.textContent = "Trạng thái: Sẵn sàng";
       btnStart.disabled = false;
       btnStop.disabled = true;
+      volumeContainer.style.display = "none";
+      updateVolume(0);
       break;
     case "starting":
       statusText.textContent = "Đang khởi tạo capture...";
       btnStart.disabled = true;
       btnStop.disabled = true;
+      volumeContainer.style.display = "block";
       break;
     case "capturing":
-      statusText.textContent = "Đang thu âm & tạo phụ đề";
+      statusText.textContent = "Đang thu âm tab";
       btnStart.disabled = true;
       btnStop.disabled = false;
+      volumeContainer.style.display = "block";
       break;
     case "stopping":
       statusText.textContent = "Đang dừng...";
       btnStart.disabled = true;
       btnStop.disabled = true;
+      volumeContainer.style.display = "none";
+      updateVolume(0);
       break;
     case "error":
       statusText.textContent = "Lỗi capture";
       btnStart.disabled = false;
       btnStop.disabled = true;
+      volumeContainer.style.display = "none";
+      updateVolume(0);
       break;
+  }
+}
+
+function updateVolume(percent: number): void {
+  if (volumeBar && volumePercent) {
+    volumeBar.style.width = `${percent}%`;
+    volumePercent.textContent = `${percent}%`;
   }
 }
 
@@ -54,10 +72,12 @@ chrome.runtime.sendMessage<ExtensionMessage>({ type: "GET_STATUS" }, (response) 
   }
 });
 
-// Listen for status updates from background
+// Listen for status updates and volume from background
 chrome.runtime.onMessage.addListener((message: ExtensionMessage) => {
   if (message.type === "STATUS_UPDATE") {
     updateUI(message.state, message.error);
+  } else if (message.type === "AUDIO_VOLUME") {
+    updateVolume(message.volume);
   }
 });
 

@@ -9,4 +9,5 @@ export type ExtensionMessage =
   | { type: "STATUS_UPDATE"; state: CaptureState; error?: string }
   | { type: "INIT_AUDIO_CAPTURE"; streamId: string; sessionId: string }
   | { type: "STOP_AUDIO_CAPTURE" }
+  | { type: "AUDIO_VOLUME"; volume: number; rms: number }
   | { type: "TRANSCRIPT_UPDATE"; segment: TranscriptSegment };
