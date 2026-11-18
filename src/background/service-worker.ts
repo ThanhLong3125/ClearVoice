@@ -1,4 +1,4 @@
-import type { ExtensionMessage, CaptureState } from "../types/messages";
+import { MessageType, type ExtensionMessage, type CaptureState } from "../types/messages";
 
 let currentState: CaptureState = "idle";
 let activeSessionId: string | null = null;
@@ -33,7 +33,7 @@ function setCaptureState(state: CaptureState, error?: string): void {
   currentState = state;
   lastErrorMsg = error;
   chrome.runtime.sendMessage<ExtensionMessage>({
-    type: "STATUS_UPDATE",
+    type: MessageType.STATUS_UPDATE,
     state,
     error,
   }).catch(() => {
@@ -68,7 +68,7 @@ async function startCapture(targetTabId: number): Promise<void> {
 
     // 3. Send command to Offscreen document to begin getUserMedia
     chrome.runtime.sendMessage<ExtensionMessage>({
-      type: "INIT_AUDIO_CAPTURE",
+      type: MessageType.INIT_AUDIO_CAPTURE,
       streamId,
       sessionId: activeSessionId,
     });
@@ -90,7 +90,7 @@ async function stopCapture(): Promise<void> {
     setCaptureState("stopping");
     // Send stop command to offscreen document
     chrome.runtime.sendMessage<ExtensionMessage>({
-      type: "STOP_AUDIO_CAPTURE",
+      type: MessageType.STOP_AUDIO_CAPTURE,
     }).catch(() => {});
 
     activeTabId = null;
@@ -107,11 +107,11 @@ async function stopCapture(): Promise<void> {
 // Handle messages from popup, offscreen, and content scripts
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
   switch (message.type) {
-    case "GET_STATUS":
+    case MessageType.GET_STATUS:
       sendResponse({ state: currentState, error: lastErrorMsg });
       break;
 
-    case "START_CAPTURE":
+    case MessageType.START_CAPTURE:
       if (message.tabId) {
         startCapture(message.tabId);
         sendResponse({ success: true });
@@ -120,19 +120,19 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendRe
       }
       break;
 
-    case "STOP_CAPTURE":
+    case MessageType.STOP_CAPTURE:
       stopCapture();
       sendResponse({ success: true });
       break;
 
-    case "AUDIO_VOLUME":
+    case MessageType.AUDIO_VOLUME:
       // Broadcast live volume to active tab's overlay
       if (activeTabId) {
         chrome.tabs.sendMessage(activeTabId, message).catch(() => {});
       }
       break;
 
-    case "TRANSCRIPT_UPDATE":
+    case MessageType.TRANSCRIPT_UPDATE:
       // Broadcast transcript to active tab's content script
       if (activeTabId) {
         chrome.tabs.sendMessage(activeTabId, message).catch(() => {});

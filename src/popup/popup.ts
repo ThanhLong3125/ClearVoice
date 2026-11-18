@@ -1,4 +1,4 @@
-import type { ExtensionMessage, CaptureState } from "../types/messages";
+import { MessageType, type ExtensionMessage, type CaptureState } from "../types/messages";
 
 const btnStart = document.getElementById("btnStart") as HTMLButtonElement;
 const btnStop = document.getElementById("btnStop") as HTMLButtonElement;
@@ -61,7 +61,7 @@ function updateVolume(percent: number): void {
 }
 
 // Request initial status when popup opens
-chrome.runtime.sendMessage<ExtensionMessage>({ type: "GET_STATUS" }, (response) => {
+chrome.runtime.sendMessage<ExtensionMessage>({ type: MessageType.GET_STATUS }, (response) => {
   if (chrome.runtime.lastError) {
     console.error("Error getting status:", chrome.runtime.lastError);
     updateUI("idle");
@@ -74,9 +74,9 @@ chrome.runtime.sendMessage<ExtensionMessage>({ type: "GET_STATUS" }, (response) 
 
 // Listen for status updates and volume from background
 chrome.runtime.onMessage.addListener((message: ExtensionMessage) => {
-  if (message.type === "STATUS_UPDATE") {
+  if (message.type === MessageType.STATUS_UPDATE) {
     updateUI(message.state, message.error);
-  } else if (message.type === "AUDIO_VOLUME") {
+  } else if (message.type === MessageType.AUDIO_VOLUME) {
     updateVolume(message.volume);
   }
 });
@@ -91,7 +91,7 @@ btnStart.addEventListener("click", async () => {
   }
 
   chrome.runtime.sendMessage<ExtensionMessage>(
-    { type: "START_CAPTURE", tabId: tab.id },
+    { type: MessageType.START_CAPTURE, tabId: tab.id },
     (response) => {
       if (chrome.runtime.lastError) {
         updateUI("error", chrome.runtime.lastError.message);
@@ -107,7 +107,7 @@ btnStart.addEventListener("click", async () => {
 // User clicks Stop
 btnStop.addEventListener("click", () => {
   updateUI("stopping");
-  chrome.runtime.sendMessage<ExtensionMessage>({ type: "STOP_CAPTURE" }, () => {
+  chrome.runtime.sendMessage<ExtensionMessage>({ type: MessageType.STOP_CAPTURE }, () => {
     if (chrome.runtime.lastError) {
       updateUI("error", chrome.runtime.lastError.message);
     }

@@ -1,4 +1,4 @@
-import type { ExtensionMessage } from "../types/messages";
+import { MessageType, type ExtensionMessage } from "../types/messages";
 
 let currentStream: MediaStream | null = null;
 let audioContext: AudioContext | null = null;
@@ -63,7 +63,7 @@ async function handleInitAudioCapture(streamId: string, sessionId: string): Prom
       const volume = Math.min(100, Math.round(rms * 250));
 
       chrome.runtime.sendMessage<ExtensionMessage>({
-        type: "AUDIO_VOLUME",
+        type: MessageType.AUDIO_VOLUME,
         volume,
         rms: Number(rms.toFixed(4)),
       }).catch(() => {});
@@ -75,7 +75,7 @@ async function handleInitAudioCapture(streamId: string, sessionId: string): Prom
   } catch (err) {
     console.error("[ClearVoice Offscreen] Failed to start audio capture:", err);
     chrome.runtime.sendMessage<ExtensionMessage>({
-      type: "STATUS_UPDATE",
+      type: MessageType.STATUS_UPDATE,
       state: "error",
       error: err instanceof Error ? err.message : String(err),
     });
@@ -108,7 +108,7 @@ function stopAudioCapture(): void {
 
   // Send zero volume when stopping
   chrome.runtime.sendMessage<ExtensionMessage>({
-    type: "AUDIO_VOLUME",
+    type: MessageType.AUDIO_VOLUME,
     volume: 0,
     rms: 0,
   }).catch(() => {});
@@ -120,11 +120,11 @@ function stopAudioCapture(): void {
 // Listen for commands from Service Worker
 chrome.runtime.onMessage.addListener((message: ExtensionMessage) => {
   switch (message.type) {
-    case "INIT_AUDIO_CAPTURE":
+    case MessageType.INIT_AUDIO_CAPTURE:
       handleInitAudioCapture(message.streamId, message.sessionId);
       break;
 
-    case "STOP_AUDIO_CAPTURE":
+    case MessageType.STOP_AUDIO_CAPTURE:
       stopAudioCapture();
       break;
   }
