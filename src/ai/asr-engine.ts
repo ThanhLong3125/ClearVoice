@@ -58,40 +58,49 @@ export class LocalAsrEngine {
       }
     };
 
-    // Attempt WebGPU first for hardware acceleration, fallback to WASM
-    try {
-      console.log("[ClearVoice AI] Attempting to load whisper-tiny via WebGPU...");
-      this.transcriber = (await pipeline(
-        "automatic-speech-recognition",
-        "onnx-community/whisper-tiny",
-        {
-          device: "webgpu",
-          progress_callback: progressCallback,
-        }
-      )) as AutomaticSpeechRecognitionPipeline;
-      this.activeDevice = "webgpu";
-      this.state = "ready";
-      console.log("[ClearVoice AI] Model successfully loaded with WebGPU backend!");
-    } catch (gpuError) {
-      console.warn("[ClearVoice AI] WebGPU not available, falling back to WebAssembly (WASM):", gpuError);
+    // Check WebGPU availability first
+    const hasWebGPU = typeof navigator !== "undefined" && "gpu" in navigator && !!navigator.gpu;
+
+    if (hasWebGPU) {
       try {
+        console.log("[ClearVoice AI] Attempting to load whisper-tiny via WebGPU...");
         this.transcriber = (await pipeline(
           "automatic-speech-recognition",
           "onnx-community/whisper-tiny",
           {
-            device: "wasm",
+            device: "webgpu",
+            dtype: "fp32",
             progress_callback: progressCallback,
           }
         )) as AutomaticSpeechRecognitionPipeline;
-        this.activeDevice = "wasm";
+        this.activeDevice = "webgpu";
         this.state = "ready";
-        console.log("[ClearVoice AI] Model successfully loaded with WASM backend!");
-      } catch (wasmError) {
-        this.state = "error";
-        this.lastError = wasmError instanceof Error ? wasmError.message : String(wasmError);
-        console.error("[ClearVoice AI] Failed to load model on both WebGPU and WASM:", wasmError);
-        throw wasmError;
+        console.log("[ClearVoice AI] Model successfully loaded with WebGPU backend!");
+        return;
+      } catch (gpuError) {
+        console.warn("[ClearVoice AI] WebGPU not available or failed, falling back to WASM:", gpuError);
       }
+    }
+
+    console.log("[ClearVoice AI] Loading whisper-tiny via WebAssembly (WASM q8)...");
+    try {
+      this.transcriber = (await pipeline(
+        "automatic-speech-recognition",
+        "onnx-community/whisper-tiny",
+        {
+          device: "wasm",
+          dtype: "q8",
+          progress_callback: progressCallback,
+        }
+      )) as AutomaticSpeechRecognitionPipeline;
+      this.activeDevice = "wasm";
+      this.state = "ready";
+      console.log("[ClearVoice AI] Model successfully loaded with WASM backend!");
+    } catch (wasmError) {
+      this.state = "error";
+      this.lastError = wasmError instanceof Error ? wasmError.message : String(wasmError);
+      console.error("[ClearVoice AI] Failed to load model on WASM:", wasmError);
+      throw wasmError;
     }
   }
 

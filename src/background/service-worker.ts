@@ -4,6 +4,12 @@ let currentState: CaptureState = "idle";
 let activeSessionId: string | null = null;
 let activeTabId: number | null = null;
 let lastErrorMsg: string | undefined = undefined;
+let lastModelStatus: {
+  status: "idle" | "loading" | "ready" | "error";
+  progress?: number;
+  device?: string;
+  error?: string;
+} = { status: "idle" };
 
 const OFFSCREEN_DOCUMENT_PATH = "src/offscreen/offscreen.html";
 
@@ -108,7 +114,16 @@ async function stopCapture(): Promise<void> {
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
   switch (message.type) {
     case MessageType.GET_STATUS:
-      sendResponse({ state: currentState, error: lastErrorMsg });
+      sendResponse({ state: currentState, error: lastErrorMsg, modelStatus: lastModelStatus });
+      break;
+
+    case MessageType.MODEL_STATUS:
+      lastModelStatus = {
+        status: message.status,
+        progress: message.progress,
+        device: message.device,
+        error: message.error,
+      };
       break;
 
     case MessageType.START_CAPTURE:

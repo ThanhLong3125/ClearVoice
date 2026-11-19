@@ -87,6 +87,28 @@ function resetStats(): void {
   if (statQueue) statQueue.textContent = "0/5";
 }
 
+function updateModelUI(modelStatus?: {
+  status: "idle" | "loading" | "ready" | "error";
+  progress?: number;
+  device?: string;
+  error?: string;
+}): void {
+  if (!statModel || !modelStatus) return;
+  if (modelStatus.status === "loading") {
+    statModel.textContent = `Tải model (${modelStatus.progress ?? 0}%)`;
+    statModel.style.color = "#38bdf8";
+  } else if (modelStatus.status === "ready") {
+    statModel.textContent = `Sẵn sàng (${modelStatus.device?.toUpperCase() ?? "WASM"})`;
+    statModel.style.color = "#10b981";
+  } else if (modelStatus.status === "error") {
+    statModel.textContent = modelStatus.error ? `Lỗi: ${modelStatus.error.slice(0, 15)}...` : "Lỗi nạp AI";
+    statModel.style.color = "#ef4444";
+  } else if (modelStatus.status === "idle") {
+    statModel.textContent = "Chờ khởi tạo...";
+    statModel.style.color = "#94a3b8";
+  }
+}
+
 // Request initial status when popup opens
 chrome.runtime.sendMessage<ExtensionMessage>({ type: MessageType.GET_STATUS }, (response) => {
   if (chrome.runtime.lastError) {
@@ -96,6 +118,9 @@ chrome.runtime.sendMessage<ExtensionMessage>({ type: MessageType.GET_STATUS }, (
   }
   if (response && response.state) {
     updateUI(response.state, response.error);
+    if (response.modelStatus) {
+      updateModelUI(response.modelStatus);
+    }
   }
 });
 
@@ -106,18 +131,7 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage) => {
   } else if (message.type === MessageType.AUDIO_VOLUME) {
     updateVolume(message.volume);
   } else if (message.type === MessageType.MODEL_STATUS) {
-    if (statModel) {
-      if (message.status === "loading") {
-        statModel.textContent = `Tải model (${message.progress ?? 0}%)`;
-        statModel.style.color = "#38bdf8";
-      } else if (message.status === "ready") {
-        statModel.textContent = `Sẵn sàng (${message.device?.toUpperCase() ?? "WASM"})`;
-        statModel.style.color = "#10b981";
-      } else if (message.status === "error") {
-        statModel.textContent = "Lỗi nạp AI";
-        statModel.style.color = "#ef4444";
-      }
-    }
+    updateModelUI(message);
   } else if (message.type === MessageType.PIPELINE_METRICS) {
     if (statVad) {
       if (message.isSpeechActive) {
