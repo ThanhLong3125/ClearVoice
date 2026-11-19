@@ -92,16 +92,19 @@ const selectLang = document.getElementById("selectLang") as HTMLSelectElement;
 function updateModelUI(modelStatus?: {
   status: "idle" | "loading" | "ready" | "error";
   progress?: number;
+  file?: string;
   device?: string;
   error?: string;
 }): void {
   if (!statModel || !modelStatus) return;
   if (modelStatus.status === "loading") {
-    if (modelStatus.progress === 100) {
-      statModel.textContent = "Khởi tạo AI...";
+    const rawFile = modelStatus.file?.split("/").pop()?.replace(".onnx", "").replace("_model", "") ?? "AI";
+    const percent = modelStatus.progress ?? 0;
+    if (percent === 100 && (rawFile.includes("decoder") || rawFile.includes("q4"))) {
+      statModel.textContent = "Đang nạp bộ nhớ...";
       statModel.style.color = "#38bdf8";
     } else {
-      statModel.textContent = `Tải model (${modelStatus.progress ?? 0}%)`;
+      statModel.textContent = `Tải ${rawFile} (${percent}%)`;
       statModel.style.color = "#38bdf8";
     }
   } else if (modelStatus.status === "ready") {

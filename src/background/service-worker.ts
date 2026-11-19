@@ -7,6 +7,7 @@ let lastErrorMsg: string | undefined = undefined;
 let lastModelStatus: {
   status: "idle" | "loading" | "ready" | "error";
   progress?: number;
+  file?: string;
   device?: string;
   error?: string;
 } = { status: "idle" };
@@ -121,6 +122,7 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendRe
       lastModelStatus = {
         status: message.status,
         progress: message.progress,
+        file: message.file,
         device: message.device,
         error: message.error,
       };

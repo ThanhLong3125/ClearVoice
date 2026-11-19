@@ -136,6 +136,7 @@ async function handleInitAudioCapture(streamId: string, sessionId: string): Prom
             type: MessageType.MODEL_STATUS,
             status: "loading",
             progress: progressInfo.progress,
+            file: progressInfo.file,
           }).catch(() => {});
         })
         .then(() => {

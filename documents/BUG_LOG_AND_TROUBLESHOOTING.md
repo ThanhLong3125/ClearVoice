@@ -17,6 +17,7 @@
 | **BUG-007** | Không bật nhạc mà Hàng đợi Queue vẫn bị dâng lên `5/5` | Âm thanh im lặng (Silence) trong PCM là chuỗi số 0 liên tục | Tích hợp bộ lọc năng lượng `EnergyVad` chặn chunk im lặng | ✅ Đã sửa |
 | **BUG-008** | Chunk âm thanh bị rơi mất khi AI đang bận suy luận | Gọi inference trực tiếp trong event `onChunkReady` gây race condition | Xây dựng vòng lặp tiêu thụ độc lập `runAsrConsumerLoop()` (FIFO) | ✅ Đã sửa |
 | **BUG-009** | Nhận diện tiếng Việt bị chậm hoặc sai | Whisper mất thời gian chạy thuật toán đoán ngôn ngữ (Language Detection) | Thêm dropdown chọn ngôn ngữ, ép `language: "vietnamese"` | ✅ Đã sửa |
+| **BUG-010** | Popup bị kẹt ở `Khởi tạo AI...` do tải ngầm file FP32 300MB | Dùng `fp32` khiến model nặng 300MB; progress callback nhảy 100% ở file config nhỏ | Chuyển sang `dtype: "q4"` (chỉ ~40MB) và hiển thị tên file tải chi tiết | ✅ Đã sửa |
 
 ---
 
@@ -108,7 +109,12 @@
 
 ---
 
-### BUG-009: Chi phí nhận diện ngôn ngữ tự động (Language Detection Overhead)
-* **Triệu chứng:** Video tiếng Việt nhận diện bị chậm, đôi khi nhận nhầm sang tiếng Anh hoặc ra ký tự lạ.
-* **Nguyên nhân:** Nếu không chỉ định ngôn ngữ, Whisper phải chạy một mạng phụ để dự đoán xác suất ngôn ngữ trước mỗi câu, làm tăng thời gian xử lý và giảm độ chính xác trên các câu thoại ngắn.
-* **Cách xử lý:** Bổ sung menu chọn ngôn ngữ trên giao diện Popup. Khi chọn `Tiếng Việt`, pipeline truyền trực tiếp tham số `language: "vietnamese"`, giúp Whisper bỏ qua bước đoán ngôn ngữ và tăng tốc độ giải mã lên gấp đôi.
+### BUG-010: Dung lượng mô hình FP32 quá nặng (300MB) gây hiểu lầm treo ở bước "Khởi tạo AI..."
+* **Triệu chứng:** Popup hiển thị `Khởi tạo AI...` kéo dài hàng phút dù máy đã đếm tới 60-70 chunks.
+* **Nguyên nhân:**
+  1. Khi cấu hình `dtype: "fp32"`, tổng dung lượng của 2 file mạng `encoder_model.onnx` (152MB) và `decoder_model_merged.onnx` (146MB) lên tới gần **300 Megabytes**.
+  2. Sự kiện `progress_callback` phát tín hiệu `progress = 100` khi các file cấu hình nhỏ ban đầu (`config.json`, `tokenizer.json`) tải xong. Giao diện Popup bắt được con số 100% này và vội vã chuyển sang hiển thị `Khởi tạo AI...`, trong khi thực tế 2 file mô hình khổng lồ 300MB vẫn đang âm thầm tải tiếp trong nền. Người dùng tưởng rằng hệ thống bị treo.
+* **Cách xử lý:**
+  1. Chuyển cấu hình mô hình sang **`dtype: "q4"` (Quantized 4-bit)**: Dung lượng giảm 7 lần (từ 300MB xuống chỉ còn **~40MB**), thời gian tải giảm từ vài phút xuống chỉ còn khoảng **10 - 15 giây**.
+  2. Bổ sung thông tin chi tiết tên file đang tải lên Popup (ví dụ: `Tải encoder_q4 (45%)` ➡️ `Tải decoder_q4 (80%)` ➡️ `Đang nạp bộ nhớ...`), giúp người dùng nhìn thấy rõ tiến trình đang chạy liên tục, không gây cảm giác bị treo.
+  3. Sử dụng `initPromise` để ngăn chặn việc gọi tải mô hình trùng lặp khi người dùng bấm Start/Stop nhiều lần.

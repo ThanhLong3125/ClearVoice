@@ -25,10 +25,11 @@ export interface AsrProgress {
 export class LocalAsrEngine {
   private transcriber: AutomaticSpeechRecognitionPipeline | null = null;
   private state: AsrState = "idle";
-  private activeDevice: "webgpu" | "wasm" = "webgpu";
+  private activeDevice: "webgpu" | "wasm" = "wasm";
   private lastError: string | null = null;
   private isProcessing: boolean = false;
   private currentLanguage: string = "vietnamese";
+  private initPromise: Promise<void> | null = null;
 
   public setLanguage(language: string): void {
     this.currentLanguage = language;
@@ -56,45 +57,51 @@ export class LocalAsrEngine {
   }
 
   /**
-   * Initialize and load the Whisper model into browser memory/GPU.
+   * Initialize and load the Whisper model into browser memory.
    */
   public async initialize(onProgress?: (info: AsrProgress) => void): Promise<void> {
-    if (this.transcriber) return;
+    if (this.initPromise) {
+      return this.initPromise;
+    }
 
     this.state = "loading";
     this.lastError = null;
 
-    const progressCallback = (data: { status: string; progress?: number; file?: string }) => {
-      if (onProgress && typeof data.progress === "number") {
-        onProgress({
-          progress: Math.round(data.progress),
-          file: data.file,
-          status: data.status,
-        });
-      }
-    };
-
-    // Use CPU / WASM backend for universal stability (avoids WebGPU shader compilation hangs on Linux)
-    console.log("[ClearVoice AI] Initializing whisper-tiny via CPU / WASM SIMD backend...");
-    try {
-      this.transcriber = (await pipeline(
-        "automatic-speech-recognition",
-        "onnx-community/whisper-tiny",
-        {
-          device: "cpu",
-          dtype: "fp32",
-          progress_callback: progressCallback,
+    this.initPromise = (async () => {
+      const progressCallback = (data: { status: string; progress?: number; file?: string }) => {
+        if (onProgress && typeof data.progress === "number") {
+          onProgress({
+            progress: Math.round(data.progress),
+            file: data.file,
+            status: data.status,
+          });
         }
-      )) as AutomaticSpeechRecognitionPipeline;
-      this.activeDevice = "wasm";
-      this.state = "ready";
-      console.log("[ClearVoice AI] Model successfully loaded and ready for inference!");
-    } catch (wasmError) {
-      this.state = "error";
-      this.lastError = wasmError instanceof Error ? wasmError.message : String(wasmError);
-      console.error("[ClearVoice AI] Failed to load model on CPU/WASM:", wasmError);
-      throw wasmError;
-    }
+      };
+
+      console.log("[ClearVoice AI] Initializing whisper-tiny via CPU / WASM Q4 (lightweight ~40MB)...");
+      try {
+        this.transcriber = (await pipeline(
+          "automatic-speech-recognition",
+          "onnx-community/whisper-tiny",
+          {
+            device: "cpu",
+            dtype: "q4",
+            progress_callback: progressCallback,
+          }
+        )) as AutomaticSpeechRecognitionPipeline;
+
+        this.activeDevice = "wasm";
+        this.state = "ready";
+        console.log("[ClearVoice AI] Whisper Q4 Model successfully initialized and ready!");
+      } catch (wasmError) {
+        this.state = "error";
+        this.lastError = wasmError instanceof Error ? wasmError.message : String(wasmError);
+        console.error("[ClearVoice AI] Failed to load model on CPU/WASM:", wasmError);
+        throw wasmError;
+      }
+    })();
+
+    return this.initPromise;
   }
 
   /**

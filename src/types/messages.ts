@@ -29,6 +29,7 @@ export type ExtensionMessage =
       type: MessageType.MODEL_STATUS;
       status: "idle" | "loading" | "ready" | "error";
       progress?: number;
+      file?: string;
       device?: string;
       error?: string;
     }
