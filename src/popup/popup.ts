@@ -10,6 +10,7 @@ const volumeBar = document.getElementById("volumeBar") as HTMLDivElement;
 const volumePercent = document.getElementById("volumePercent") as HTMLSpanElement;
 
 const pipelineStats = document.getElementById("pipelineStats") as HTMLDivElement;
+const statModel = document.getElementById("statModel") as HTMLElement;
 const statVad = document.getElementById("statVad") as HTMLElement;
 const statChunks = document.getElementById("statChunks") as HTMLElement;
 const statSilence = document.getElementById("statSilence") as HTMLElement;
@@ -73,6 +74,10 @@ function updateVolume(percent: number): void {
 }
 
 function resetStats(): void {
+  if (statModel) {
+    statModel.textContent = "Đang kết nối...";
+    statModel.style.color = "#38bdf8";
+  }
   if (statVad) {
     statVad.textContent = "Chờ âm thanh...";
     statVad.style.color = "#94a3b8";
@@ -100,6 +105,19 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage) => {
     updateUI(message.state, message.error);
   } else if (message.type === MessageType.AUDIO_VOLUME) {
     updateVolume(message.volume);
+  } else if (message.type === MessageType.MODEL_STATUS) {
+    if (statModel) {
+      if (message.status === "loading") {
+        statModel.textContent = `Tải model (${message.progress ?? 0}%)`;
+        statModel.style.color = "#38bdf8";
+      } else if (message.status === "ready") {
+        statModel.textContent = `Sẵn sàng (${message.device?.toUpperCase() ?? "WASM"})`;
+        statModel.style.color = "#10b981";
+      } else if (message.status === "error") {
+        statModel.textContent = "Lỗi nạp AI";
+        statModel.style.color = "#ef4444";
+      }
+    }
   } else if (message.type === MessageType.PIPELINE_METRICS) {
     if (statVad) {
       if (message.isSpeechActive) {

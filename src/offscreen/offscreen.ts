@@ -1,5 +1,6 @@
 import { MessageType, type ExtensionMessage } from "../types/messages";
 import { AudioPipeline } from "../audio/pipeline";
+import { LocalAsrEngine } from "../ai/asr-engine";
 
 let currentStream: MediaStream | null = null;
 let audioContext: AudioContext | null = null;
@@ -8,6 +9,7 @@ let analyserNode: AnalyserNode | null = null;
 let workletNode: AudioWorkletNode | null = null;
 let volumeInterval: number | null = null;
 let pipeline: AudioPipeline | null = null;
+let asrEngine: LocalAsrEngine | null = null;
 
 /**
  * Start capturing audio from tab MediaStream ID.
@@ -91,6 +93,33 @@ async function handleInitAudioCapture(streamId: string, sessionId: string): Prom
     await audioContext.audioWorklet.addModule(workletUrl);
     workletNode = new AudioWorkletNode(audioContext, "audio-stream-processor");
 
+    // CRITICAL 4: Initialize or warm up Local AI ASR Engine (Whisper)
+    if (!asrEngine) {
+      asrEngine = new LocalAsrEngine();
+      asrEngine
+        .initialize((progressInfo) => {
+          chrome.runtime.sendMessage<ExtensionMessage>({
+            type: MessageType.MODEL_STATUS,
+            status: "loading",
+            progress: progressInfo.progress,
+          }).catch(() => {});
+        })
+        .then(() => {
+          chrome.runtime.sendMessage<ExtensionMessage>({
+            type: MessageType.MODEL_STATUS,
+            status: "ready",
+            device: asrEngine?.getDevice(),
+          }).catch(() => {});
+        })
+        .catch((err) => {
+          chrome.runtime.sendMessage<ExtensionMessage>({
+            type: MessageType.MODEL_STATUS,
+            status: "error",
+            error: String(err),
+          }).catch(() => {});
+        });
+    }
+
     pipeline = new AudioPipeline(sessionId, {
       sourceSampleRate: audioContext.sampleRate,
       targetSampleRate: 16000,
@@ -113,6 +142,19 @@ async function handleInitAudioCapture(streamId: string, sessionId: string): Prom
           isSpeechActive: true,
           silenceChunksFiltered: stats ? stats.silenceChunksFiltered : 0,
         }).catch(() => {});
+
+        // CONSUMER: Pass chunk to Local AI ASR Engine for real-time transcription
+        if (asrEngine && asrEngine.isReady()) {
+          asrEngine.transcribe(chunk).then((segment) => {
+            if (segment && segment.text) {
+              console.log(`[ClearVoice ASR] Subtitle emitted: "${segment.text}"`);
+              chrome.runtime.sendMessage<ExtensionMessage>({
+                type: MessageType.TRANSCRIPT_UPDATE,
+                segment,
+              }).catch(() => {});
+            }
+          });
+        }
       },
     });
 

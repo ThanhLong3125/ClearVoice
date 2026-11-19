@@ -9,6 +9,9 @@
     "storage",
     "activeTab"
   ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
   "action": {
     "default_popup": "src/popup/index.html",
     "default_title": "ClearVoice"
@@ -27,7 +30,7 @@
   ],
   "web_accessible_resources": [
     {
-      "resources": ["audio-processor.js"],
+      "resources": ["audio-processor.js", "assets/*"],
       "matches": ["<all_urls>"]
     }
   ]
