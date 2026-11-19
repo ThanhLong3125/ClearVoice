@@ -87,6 +87,8 @@ function resetStats(): void {
   if (statQueue) statQueue.textContent = "0/5";
 }
 
+const selectLang = document.getElementById("selectLang") as HTMLSelectElement;
+
 function updateModelUI(modelStatus?: {
   status: "idle" | "loading" | "ready" | "error";
   progress?: number;
@@ -95,8 +97,13 @@ function updateModelUI(modelStatus?: {
 }): void {
   if (!statModel || !modelStatus) return;
   if (modelStatus.status === "loading") {
-    statModel.textContent = `Tải model (${modelStatus.progress ?? 0}%)`;
-    statModel.style.color = "#38bdf8";
+    if (modelStatus.progress === 100) {
+      statModel.textContent = "Khởi tạo AI...";
+      statModel.style.color = "#38bdf8";
+    } else {
+      statModel.textContent = `Tải model (${modelStatus.progress ?? 0}%)`;
+      statModel.style.color = "#38bdf8";
+    }
   } else if (modelStatus.status === "ready") {
     statModel.textContent = `Sẵn sàng (${modelStatus.device?.toUpperCase() ?? "WASM"})`;
     statModel.style.color = "#10b981";
@@ -109,6 +116,14 @@ function updateModelUI(modelStatus?: {
     statModel.style.color = "#94a3b8";
   }
 }
+
+selectLang?.addEventListener("change", () => {
+  const language = selectLang.value;
+  chrome.runtime.sendMessage<ExtensionMessage>({
+    type: MessageType.SET_LANGUAGE,
+    language,
+  }).catch(() => {});
+});
 
 // Request initial status when popup opens
 chrome.runtime.sendMessage<ExtensionMessage>({ type: MessageType.GET_STATUS }, (response) => {

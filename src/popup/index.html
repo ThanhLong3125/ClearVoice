@@ -27,7 +27,16 @@
         <div id="volumeBar" class="volume-bar-fill"></div>
       </div>
 
-      <div class="pipeline-stats" id="pipelineStats" style="display: none;">
+      <div class="lang-row">
+      <label for="selectLang">Ngôn ngữ ASR:</label>
+      <select id="selectLang" class="lang-select">
+        <option value="vietnamese" selected>Tiếng Việt</option>
+        <option value="english">English</option>
+        <option value="auto">Tự động phát hiện</option>
+      </select>
+    </div>
+
+    <div class="pipeline-stats" id="pipelineStats" style="display: none;">
         <div class="stat-row">
           <span>AI Whisper:</span>
           <strong id="statModel" style="color: #38bdf8;">Đang kết nối...</strong>

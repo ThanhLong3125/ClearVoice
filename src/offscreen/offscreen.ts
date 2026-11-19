@@ -10,6 +10,40 @@ let workletNode: AudioWorkletNode | null = null;
 let volumeInterval: number | null = null;
 let pipeline: AudioPipeline | null = null;
 let asrEngine: LocalAsrEngine | null = null;
+let consumerLoopActive: boolean = false;
+
+/**
+ * Dedicated Consumer Loop: Pulls audio chunks from bounded queue and transcribes them in FIFO order.
+ */
+async function runAsrConsumerLoop(): Promise<void> {
+  if (consumerLoopActive) return;
+  consumerLoopActive = true;
+  console.log("[ClearVoice Offscreen] ASR Consumer Loop started.");
+
+  while (consumerLoopActive) {
+    if (asrEngine && asrEngine.isReady() && pipeline) {
+      const chunk = pipeline.nextChunk();
+      if (chunk) {
+        try {
+          const segment = await asrEngine.transcribe(chunk);
+          if (segment && segment.text) {
+            console.log(`[ClearVoice ASR] Subtitle emitted: "${segment.text}"`);
+            chrome.runtime.sendMessage<ExtensionMessage>({
+              type: MessageType.TRANSCRIPT_UPDATE,
+              segment,
+            }).catch(() => {});
+          }
+        } catch (err) {
+          console.error("[ClearVoice ASR] Error in consumer loop:", err);
+        }
+        continue; // Process next chunk immediately
+      }
+    }
+    // Yield 100ms when queue is empty or model is loading/inferring
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  console.log("[ClearVoice Offscreen] ASR Consumer Loop stopped.");
+}
 
 /**
  * Start capturing audio from tab MediaStream ID.
@@ -142,21 +176,11 @@ async function handleInitAudioCapture(streamId: string, sessionId: string): Prom
           isSpeechActive: true,
           silenceChunksFiltered: stats ? stats.silenceChunksFiltered : 0,
         }).catch(() => {});
-
-        // CONSUMER: Pass chunk to Local AI ASR Engine for real-time transcription
-        if (asrEngine && asrEngine.isReady()) {
-          asrEngine.transcribe(chunk).then((segment) => {
-            if (segment && segment.text) {
-              console.log(`[ClearVoice ASR] Subtitle emitted: "${segment.text}"`);
-              chrome.runtime.sendMessage<ExtensionMessage>({
-                type: MessageType.TRANSCRIPT_UPDATE,
-                segment,
-              }).catch(() => {});
-            }
-          });
-        }
       },
     });
+
+    // Start consumer loop to process chunks from queue
+    runAsrConsumerLoop();
 
     workletNode.port.onmessage = (event: MessageEvent<{ channels: Float32Array[] }>) => {
       if (pipeline && event.data && event.data.channels) {
@@ -183,6 +207,7 @@ async function handleInitAudioCapture(streamId: string, sessionId: string): Prom
  * Stop capturing audio, release tracks, and close AudioContext.
  */
 function stopAudioCapture(): void {
+  consumerLoopActive = false;
   if (volumeInterval) {
     clearInterval(volumeInterval);
     volumeInterval = null;
@@ -235,6 +260,12 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage) => {
 
     case MessageType.STOP_AUDIO_CAPTURE:
       stopAudioCapture();
+      break;
+
+    case MessageType.SET_LANGUAGE:
+      if (asrEngine) {
+        asrEngine.setLanguage(message.language);
+      }
       break;
   }
 });

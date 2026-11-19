@@ -12,6 +12,7 @@ export enum MessageType {
   AUDIO_VOLUME = "AUDIO_VOLUME",
   PIPELINE_METRICS = "PIPELINE_METRICS",
   MODEL_STATUS = "MODEL_STATUS",
+  SET_LANGUAGE = "SET_LANGUAGE",
   TRANSCRIPT_UPDATE = "TRANSCRIPT_UPDATE",
 }
 
@@ -23,6 +24,7 @@ export type ExtensionMessage =
   | { type: MessageType.INIT_AUDIO_CAPTURE; streamId: string; sessionId: string }
   | { type: MessageType.STOP_AUDIO_CAPTURE }
   | { type: MessageType.AUDIO_VOLUME; volume: number; rms: number }
+  | { type: MessageType.SET_LANGUAGE; language: string }
   | {
       type: MessageType.MODEL_STATUS;
       status: "idle" | "loading" | "ready" | "error";

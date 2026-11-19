@@ -84,6 +84,30 @@ body {
   border-top: 1px solid #334155;
 }
 
+.lang-row {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.lang-select {
+  background: #0f172a;
+  border: 1px solid #334155;
+  color: var(--text-main);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 0.8rem;
+  outline: none;
+  cursor: pointer;
+}
+
+.lang-select:focus {
+  border-color: var(--primary);
+}
+
 .volume-label {
   display: flex;
   justify-content: space-between;

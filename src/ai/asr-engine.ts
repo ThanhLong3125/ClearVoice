@@ -28,6 +28,16 @@ export class LocalAsrEngine {
   private activeDevice: "webgpu" | "wasm" = "webgpu";
   private lastError: string | null = null;
   private isProcessing: boolean = false;
+  private currentLanguage: string = "vietnamese";
+
+  public setLanguage(language: string): void {
+    this.currentLanguage = language;
+    console.log(`[ClearVoice AI] Target language set to: ${language}`);
+  }
+
+  public getLanguage(): string {
+    return this.currentLanguage;
+  }
 
   public getState(): AsrState {
     return this.state;
@@ -130,12 +140,18 @@ export class LocalAsrEngine {
     try {
       const startTime = performance.now();
 
-      // Whisper requires 16000Hz mono Float32Array
-      // We pass task: 'transcribe' (supports Vietnamese and English automatically)
-      const output = (await this.transcriber(chunk.samples, {
+      // Whisper parameters: pass language explicitly to avoid slow language detection
+      const options: Record<string, unknown> = {
         task: "transcribe",
         return_timestamps: true,
-      })) as { text: string } | Array<{ text: string }>;
+      };
+      if (this.currentLanguage && this.currentLanguage !== "auto") {
+        options.language = this.currentLanguage;
+      }
+
+      const output = (await this.transcriber(chunk.samples, options)) as
+        | { text: string }
+        | Array<{ text: string }>;
 
       const inferenceDuration = Math.round(performance.now() - startTime);
 
