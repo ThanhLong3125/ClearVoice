@@ -2,6 +2,7 @@ import { downmixToMono } from "./format";
 import { StreamResampler } from "./resampler";
 import { SlidingWindowChunker, type SlidingWindowConfig } from "./chunker";
 import { BoundedQueue, type QueueMetrics } from "./queue";
+import { EnergyVad } from "./vad";
 import type { AudioChunk } from "../types/audio";
 
 export interface AudioPipelineConfig {
@@ -10,21 +11,24 @@ export interface AudioPipelineConfig {
   windowDurationSec: number;// e.g. 3.0
   hopDurationSec: number;   // e.g. 1.0
   maxQueueCapacity: number; // e.g. 5
+  vadThresholdRms?: number; // default: 0.003
   onChunkReady?: (chunk: AudioChunk) => void;
 }
 
 /**
  * AudioPipeline: Coordinates format conversion, streaming resampling,
- * sliding-window chunking, and backpressure queueing.
+ * VAD silence filtering, sliding-window chunking, and backpressure queueing.
  */
 export class AudioPipeline {
   private readonly resampler: StreamResampler;
   private readonly chunker: SlidingWindowChunker;
   private readonly queue: BoundedQueue<AudioChunk>;
+  private readonly vad: EnergyVad;
   private readonly onChunkReady?: (chunk: AudioChunk) => void;
 
   private totalInputFrames: number = 0;
   private totalEmittedChunks: number = 0;
+  private silenceChunksFiltered: number = 0;
 
   constructor(sessionId: string, config: AudioPipelineConfig) {
     this.resampler = new StreamResampler(config.sourceSampleRate, config.targetSampleRate);
@@ -36,6 +40,7 @@ export class AudioPipeline {
     };
     this.chunker = new SlidingWindowChunker(sessionId, chunkerConfig);
     this.queue = new BoundedQueue<AudioChunk>(config.maxQueueCapacity);
+    this.vad = new EnergyVad({ thresholdRms: config.vadThresholdRms ?? 0.003 });
     this.onChunkReady = config.onChunkReady;
   }
 
@@ -55,14 +60,28 @@ export class AudioPipeline {
     // 3. Sliding window chunking
     const newChunks = this.chunker.push(resampled);
 
-    // 4. Queue and notify
+    // 4. VAD silence filtering before queueing
     for (const chunk of newChunks) {
+      const vadResult = this.vad.process(chunk.samples);
+      if (!vadResult.isActive) {
+        // Drop pure silence chunk to protect AI from hallucination and preserve queue capacity
+        this.silenceChunksFiltered++;
+        continue;
+      }
+
       this.totalEmittedChunks++;
       this.queue.enqueue(chunk);
       if (this.onChunkReady) {
         this.onChunkReady(chunk);
       }
     }
+  }
+
+  /**
+   * Check if speech activity is currently active.
+   */
+  public isSpeechActive(): boolean {
+    return this.vad.speechActive;
   }
 
   /**
@@ -78,11 +97,15 @@ export class AudioPipeline {
   public getStats(): {
     totalInputFrames: number;
     totalEmittedChunks: number;
+    silenceChunksFiltered: number;
+    isSpeechActive: boolean;
     queueMetrics: QueueMetrics;
   } {
     return {
       totalInputFrames: this.totalInputFrames,
       totalEmittedChunks: this.totalEmittedChunks,
+      silenceChunksFiltered: this.silenceChunksFiltered,
+      isSpeechActive: this.vad.speechActive,
       queueMetrics: this.queue.getMetrics(),
     };
   }
@@ -94,7 +117,9 @@ export class AudioPipeline {
     this.resampler.reset();
     this.chunker.reset();
     this.queue.clear();
+    this.vad.reset();
     this.totalInputFrames = 0;
     this.totalEmittedChunks = 0;
+    this.silenceChunksFiltered = 0;
   }
 }

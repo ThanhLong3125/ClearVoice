@@ -70,7 +70,21 @@ async function handleInitAudioCapture(streamId: string, sessionId: string): Prom
         volume,
         rms: Number(rms.toFixed(4)),
       }).catch(() => {});
-    }, 70);
+
+      // Periodically update pipeline status (speech active & queue depth)
+      if (pipeline) {
+        const stats = pipeline.getStats();
+        chrome.runtime.sendMessage<ExtensionMessage>({
+          type: MessageType.PIPELINE_METRICS,
+          totalChunks: stats.totalEmittedChunks,
+          durationSec: Number(((stats.totalEmittedChunks * 16000) / 16000).toFixed(1)),
+          queueDepth: stats.queueMetrics.currentDepth,
+          queueCapacity: 5,
+          isSpeechActive: stats.isSpeechActive,
+          silenceChunksFiltered: stats.silenceChunksFiltered,
+        }).catch(() => {});
+      }
+    }, 100);
 
     // CRITICAL 3: Initialize AudioWorklet & Audio Processing Pipeline
     const workletUrl = chrome.runtime.getURL("audio-processor.js");
@@ -86,7 +100,7 @@ async function handleInitAudioCapture(streamId: string, sessionId: string): Prom
       onChunkReady: (chunk) => {
         const stats = pipeline?.getStats();
         console.log(
-          `[ClearVoice Pipeline] Chunk #${chunk.sequence} generated | Size: ${chunk.samples.length} samples (3.0s @ 16kHz mono) | Timeline: ${(chunk.startSample / 16000).toFixed(2)}s`
+          `[ClearVoice Pipeline] Active Speech Chunk #${chunk.sequence} | Samples: ${chunk.samples.length} (3.0s @ 16kHz) | Timeline: ${(chunk.startSample / 16000).toFixed(2)}s`
         );
 
         // Broadcast pipeline metrics to popup UI
@@ -96,6 +110,8 @@ async function handleInitAudioCapture(streamId: string, sessionId: string): Prom
           durationSec: Number(((chunk.startSample + chunk.samples.length) / 16000).toFixed(1)),
           queueDepth: stats ? stats.queueMetrics.currentDepth : 1,
           queueCapacity: 5,
+          isSpeechActive: true,
+          silenceChunksFiltered: stats ? stats.silenceChunksFiltered : 0,
         }).catch(() => {});
       },
     });

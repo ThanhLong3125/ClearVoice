@@ -10,8 +10,9 @@ const volumeBar = document.getElementById("volumeBar") as HTMLDivElement;
 const volumePercent = document.getElementById("volumePercent") as HTMLSpanElement;
 
 const pipelineStats = document.getElementById("pipelineStats") as HTMLDivElement;
+const statVad = document.getElementById("statVad") as HTMLElement;
 const statChunks = document.getElementById("statChunks") as HTMLElement;
-const statDuration = document.getElementById("statDuration") as HTMLElement;
+const statSilence = document.getElementById("statSilence") as HTMLElement;
 const statQueue = document.getElementById("statQueue") as HTMLElement;
 
 function updateUI(state: CaptureState, error?: string): void {
@@ -72,8 +73,12 @@ function updateVolume(percent: number): void {
 }
 
 function resetStats(): void {
+  if (statVad) {
+    statVad.textContent = "Chờ âm thanh...";
+    statVad.style.color = "#94a3b8";
+  }
   if (statChunks) statChunks.textContent = "0";
-  if (statDuration) statDuration.textContent = "0.0s";
+  if (statSilence) statSilence.textContent = "0 chunks";
   if (statQueue) statQueue.textContent = "0/5";
 }
 
@@ -96,8 +101,17 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage) => {
   } else if (message.type === MessageType.AUDIO_VOLUME) {
     updateVolume(message.volume);
   } else if (message.type === MessageType.PIPELINE_METRICS) {
+    if (statVad) {
+      if (message.isSpeechActive) {
+        statVad.textContent = "Đang có tiếng nói";
+        statVad.style.color = "#10b981";
+      } else {
+        statVad.textContent = "Im lặng (Đã lọc)";
+        statVad.style.color = "#94a3b8";
+      }
+    }
     if (statChunks) statChunks.textContent = String(message.totalChunks);
-    if (statDuration) statDuration.textContent = `${message.durationSec}s`;
+    if (statSilence) statSilence.textContent = `${message.silenceChunksFiltered} chunks`;
     if (statQueue) statQueue.textContent = `${message.queueDepth}/${message.queueCapacity}`;
   }
 });

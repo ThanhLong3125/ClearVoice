@@ -29,12 +29,16 @@
 
       <div class="pipeline-stats" id="pipelineStats" style="display: none;">
         <div class="stat-row">
-          <span>Chunks 16kHz:</span>
+          <span>Tiếng nói (VAD):</span>
+          <strong id="statVad" style="color: #94a3b8;">Chờ âm thanh...</strong>
+        </div>
+        <div class="stat-row">
+          <span>Chunks có tiếng:</span>
           <strong id="statChunks">0</strong>
         </div>
         <div class="stat-row">
-          <span>Thời lượng audio:</span>
-          <strong id="statDuration">0.0s</strong>
+          <span>Đã lọc im lặng:</span>
+          <strong id="statSilence">0 chunks</strong>
         </div>
         <div class="stat-row">
           <span>Hàng đợi Queue:</span>

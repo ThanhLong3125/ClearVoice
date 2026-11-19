@@ -28,5 +28,7 @@ export type ExtensionMessage =
       durationSec: number;
       queueDepth: number;
       queueCapacity: number;
+      isSpeechActive: boolean;
+      silenceChunksFiltered: number;
     }
   | { type: MessageType.TRANSCRIPT_UPDATE; segment: TranscriptSegment };
