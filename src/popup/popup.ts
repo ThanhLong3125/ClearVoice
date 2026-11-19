@@ -101,7 +101,8 @@ function updateModelUI(modelStatus?: {
     statModel.textContent = `Sẵn sàng (${modelStatus.device?.toUpperCase() ?? "WASM"})`;
     statModel.style.color = "#10b981";
   } else if (modelStatus.status === "error") {
-    statModel.textContent = modelStatus.error ? `Lỗi: ${modelStatus.error.slice(0, 15)}...` : "Lỗi nạp AI";
+    statModel.textContent = "Lỗi nạp AI (Xem log)";
+    statModel.title = modelStatus.error ?? "";
     statModel.style.color = "#ef4444";
   } else if (modelStatus.status === "idle") {
     statModel.textContent = "Chờ khởi tạo...";

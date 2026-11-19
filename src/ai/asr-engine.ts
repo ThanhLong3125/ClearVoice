@@ -5,6 +5,12 @@ import type { AudioChunk, TranscriptSegment } from "../types/audio";
 env.allowLocalModels = false;
 env.useBrowserCache = true;
 
+// Configure ONNX Runtime WASM to avoid SharedArrayBuffer issues in extensions
+if (env.backends?.onnx?.wasm) {
+  env.backends.onnx.wasm.numThreads = 1;
+  env.backends.onnx.wasm.proxy = false;
+}
+
 export type AsrState = "idle" | "loading" | "ready" | "inferring" | "error";
 
 export interface AsrProgress {
@@ -78,28 +84,28 @@ export class LocalAsrEngine {
         console.log("[ClearVoice AI] Model successfully loaded with WebGPU backend!");
         return;
       } catch (gpuError) {
-        console.warn("[ClearVoice AI] WebGPU not available or failed, falling back to WASM:", gpuError);
+        console.warn("[ClearVoice AI] WebGPU not available or failed, falling back to CPU (WASM):", gpuError);
       }
     }
 
-    console.log("[ClearVoice AI] Loading whisper-tiny via WebAssembly (WASM q8)...");
+    console.log("[ClearVoice AI] Loading whisper-tiny via CPU / WASM backend...");
     try {
       this.transcriber = (await pipeline(
         "automatic-speech-recognition",
         "onnx-community/whisper-tiny",
         {
-          device: "wasm",
-          dtype: "q8",
+          device: "cpu",
+          dtype: "fp32",
           progress_callback: progressCallback,
         }
       )) as AutomaticSpeechRecognitionPipeline;
       this.activeDevice = "wasm";
       this.state = "ready";
-      console.log("[ClearVoice AI] Model successfully loaded with WASM backend!");
+      console.log("[ClearVoice AI] Model successfully loaded with CPU/WASM backend!");
     } catch (wasmError) {
       this.state = "error";
       this.lastError = wasmError instanceof Error ? wasmError.message : String(wasmError);
-      console.error("[ClearVoice AI] Failed to load model on WASM:", wasmError);
+      console.error("[ClearVoice AI] Failed to load model on CPU/WASM:", wasmError);
       throw wasmError;
     }
   }
