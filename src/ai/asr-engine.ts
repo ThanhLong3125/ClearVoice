@@ -74,31 +74,8 @@ export class LocalAsrEngine {
       }
     };
 
-    // Check WebGPU availability first
-    const hasWebGPU = typeof navigator !== "undefined" && "gpu" in navigator && !!navigator.gpu;
-
-    if (hasWebGPU) {
-      try {
-        console.log("[ClearVoice AI] Attempting to load whisper-tiny via WebGPU...");
-        this.transcriber = (await pipeline(
-          "automatic-speech-recognition",
-          "onnx-community/whisper-tiny",
-          {
-            device: "webgpu",
-            dtype: "fp32",
-            progress_callback: progressCallback,
-          }
-        )) as AutomaticSpeechRecognitionPipeline;
-        this.activeDevice = "webgpu";
-        this.state = "ready";
-        console.log("[ClearVoice AI] Model successfully loaded with WebGPU backend!");
-        return;
-      } catch (gpuError) {
-        console.warn("[ClearVoice AI] WebGPU not available or failed, falling back to CPU (WASM):", gpuError);
-      }
-    }
-
-    console.log("[ClearVoice AI] Loading whisper-tiny via CPU / WASM backend...");
+    // Use CPU / WASM backend for universal stability (avoids WebGPU shader compilation hangs on Linux)
+    console.log("[ClearVoice AI] Initializing whisper-tiny via CPU / WASM SIMD backend...");
     try {
       this.transcriber = (await pipeline(
         "automatic-speech-recognition",
@@ -111,7 +88,7 @@ export class LocalAsrEngine {
       )) as AutomaticSpeechRecognitionPipeline;
       this.activeDevice = "wasm";
       this.state = "ready";
-      console.log("[ClearVoice AI] Model successfully loaded with CPU/WASM backend!");
+      console.log("[ClearVoice AI] Model successfully loaded and ready for inference!");
     } catch (wasmError) {
       this.state = "error";
       this.lastError = wasmError instanceof Error ? wasmError.message : String(wasmError);
