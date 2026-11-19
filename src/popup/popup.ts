@@ -9,6 +9,11 @@ const volumeContainer = document.getElementById("volumeContainer") as HTMLDivEle
 const volumeBar = document.getElementById("volumeBar") as HTMLDivElement;
 const volumePercent = document.getElementById("volumePercent") as HTMLSpanElement;
 
+const pipelineStats = document.getElementById("pipelineStats") as HTMLDivElement;
+const statChunks = document.getElementById("statChunks") as HTMLElement;
+const statDuration = document.getElementById("statDuration") as HTMLElement;
+const statQueue = document.getElementById("statQueue") as HTMLElement;
+
 function updateUI(state: CaptureState, error?: string): void {
   statusDot.className = `status-dot ${state}`;
   errorMsg.style.display = error ? "block" : "none";
@@ -22,25 +27,30 @@ function updateUI(state: CaptureState, error?: string): void {
       btnStart.disabled = false;
       btnStop.disabled = true;
       volumeContainer.style.display = "none";
+      if (pipelineStats) pipelineStats.style.display = "none";
       updateVolume(0);
+      resetStats();
       break;
     case "starting":
       statusText.textContent = "Đang khởi tạo capture...";
       btnStart.disabled = true;
       btnStop.disabled = true;
       volumeContainer.style.display = "block";
+      if (pipelineStats) pipelineStats.style.display = "block";
       break;
     case "capturing":
       statusText.textContent = "Đang thu âm tab";
       btnStart.disabled = true;
       btnStop.disabled = false;
       volumeContainer.style.display = "block";
+      if (pipelineStats) pipelineStats.style.display = "block";
       break;
     case "stopping":
       statusText.textContent = "Đang dừng...";
       btnStart.disabled = true;
       btnStop.disabled = true;
       volumeContainer.style.display = "none";
+      if (pipelineStats) pipelineStats.style.display = "none";
       updateVolume(0);
       break;
     case "error":
@@ -48,6 +58,7 @@ function updateUI(state: CaptureState, error?: string): void {
       btnStart.disabled = false;
       btnStop.disabled = true;
       volumeContainer.style.display = "none";
+      if (pipelineStats) pipelineStats.style.display = "none";
       updateVolume(0);
       break;
   }
@@ -58,6 +69,12 @@ function updateVolume(percent: number): void {
     volumeBar.style.width = `${percent}%`;
     volumePercent.textContent = `${percent}%`;
   }
+}
+
+function resetStats(): void {
+  if (statChunks) statChunks.textContent = "0";
+  if (statDuration) statDuration.textContent = "0.0s";
+  if (statQueue) statQueue.textContent = "0/5";
 }
 
 // Request initial status when popup opens
@@ -78,6 +95,10 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage) => {
     updateUI(message.state, message.error);
   } else if (message.type === MessageType.AUDIO_VOLUME) {
     updateVolume(message.volume);
+  } else if (message.type === MessageType.PIPELINE_METRICS) {
+    if (statChunks) statChunks.textContent = String(message.totalChunks);
+    if (statDuration) statDuration.textContent = `${message.durationSec}s`;
+    if (statQueue) statQueue.textContent = `${message.queueDepth}/${message.queueCapacity}`;
   }
 });
 

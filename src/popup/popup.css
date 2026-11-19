@@ -109,6 +109,29 @@ body {
   transition: width 0.08s ease-out;
 }
 
+.pipeline-stats {
+  margin-top: 10px;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.78rem;
+}
+
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-muted);
+}
+
+.stat-row strong {
+  color: var(--primary);
+  font-weight: 600;
+}
+
 .error-msg {
   margin-top: 8px;
   font-size: 0.8rem;

@@ -26,6 +26,21 @@
       <div class="volume-bar-bg">
         <div id="volumeBar" class="volume-bar-fill"></div>
       </div>
+
+      <div class="pipeline-stats" id="pipelineStats" style="display: none;">
+        <div class="stat-row">
+          <span>Chunks 16kHz:</span>
+          <strong id="statChunks">0</strong>
+        </div>
+        <div class="stat-row">
+          <span>Thời lượng audio:</span>
+          <strong id="statDuration">0.0s</strong>
+        </div>
+        <div class="stat-row">
+          <span>Hàng đợi Queue:</span>
+          <strong id="statQueue">0/5</strong>
+        </div>
+      </div>
     </div>
 
     <div id="errorMsg" class="error-msg" style="display: none;"></div>

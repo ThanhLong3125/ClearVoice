@@ -160,7 +160,7 @@ npm run dev
 
 - [x] **Milestone 0:** Khởi tạo bộ khung dự án (Vite + TypeScript + Manifest V3) & Git workflow.
 - [x] **Milestone 1:** Tab Audio Capture & Live RMS Volume Streaming (Web Audio API, AnalyserNode).
-- [ ] **Milestone 2:** Audio Processing Pipeline (Resampling 48kHz -> 16kHz, Sliding Window Chunker, Bounded Ring Buffer).
+- [x] **Milestone 2:** Audio Processing Pipeline (AudioWorklet, Resampling 48kHz -> 16kHz Mono, Sliding Window Chunker 3s/1s hop, Bounded Ring Buffer Queue).
 - [ ] **Milestone 3:** Local AI Runtime Integration (ONNX Runtime Web / Whisper-tiny WebGPU/WASM).
 - [ ] **Milestone 4:** Live Subtitle Overlay & Transcript Stabilization Engine (Khử lặp từ, đồng bộ timeline).
 - [ ] **Milestone 5:** Benchmarking (Latency P50/P95, CPU, RAM) & Release v1.0.

@@ -1,10 +1,13 @@
 import { MessageType, type ExtensionMessage } from "../types/messages";
+import { AudioPipeline } from "../audio/pipeline";
 
 let currentStream: MediaStream | null = null;
 let audioContext: AudioContext | null = null;
 let currentSessionId: string | null = null;
 let analyserNode: AnalyserNode | null = null;
+let workletNode: AudioWorkletNode | null = null;
 let volumeInterval: number | null = null;
+let pipeline: AudioPipeline | null = null;
 
 /**
  * Start capturing audio from tab MediaStream ID.
@@ -69,8 +72,44 @@ async function handleInitAudioCapture(streamId: string, sessionId: string): Prom
       }).catch(() => {});
     }, 70);
 
+    // CRITICAL 3: Initialize AudioWorklet & Audio Processing Pipeline
+    const workletUrl = chrome.runtime.getURL("audio-processor.js");
+    await audioContext.audioWorklet.addModule(workletUrl);
+    workletNode = new AudioWorkletNode(audioContext, "audio-stream-processor");
+
+    pipeline = new AudioPipeline(sessionId, {
+      sourceSampleRate: audioContext.sampleRate,
+      targetSampleRate: 16000,
+      windowDurationSec: 3.0,
+      hopDurationSec: 1.0,
+      maxQueueCapacity: 5,
+      onChunkReady: (chunk) => {
+        const stats = pipeline?.getStats();
+        console.log(
+          `[ClearVoice Pipeline] Chunk #${chunk.sequence} generated | Size: ${chunk.samples.length} samples (3.0s @ 16kHz mono) | Timeline: ${(chunk.startSample / 16000).toFixed(2)}s`
+        );
+
+        // Broadcast pipeline metrics to popup UI
+        chrome.runtime.sendMessage<ExtensionMessage>({
+          type: MessageType.PIPELINE_METRICS,
+          totalChunks: chunk.sequence + 1,
+          durationSec: Number(((chunk.startSample + chunk.samples.length) / 16000).toFixed(1)),
+          queueDepth: stats ? stats.queueMetrics.currentDepth : 1,
+          queueCapacity: 5,
+        }).catch(() => {});
+      },
+    });
+
+    workletNode.port.onmessage = (event: MessageEvent<{ channels: Float32Array[] }>) => {
+      if (pipeline && event.data && event.data.channels) {
+        pipeline.pushFrames(event.data.channels);
+      }
+    };
+
+    sourceNode.connect(workletNode);
+
     console.log(
-      `[ClearVoice Offscreen] Audio capture active. Sample rate: ${audioContext.sampleRate}Hz, Session: ${sessionId}`
+      `[ClearVoice Offscreen] Audio capture & pipeline active. Source: ${audioContext.sampleRate}Hz, Target: 16000Hz mono. Session: ${sessionId}`
     );
   } catch (err) {
     console.error("[ClearVoice Offscreen] Failed to start audio capture:", err);
@@ -89,6 +128,18 @@ function stopAudioCapture(): void {
   if (volumeInterval) {
     clearInterval(volumeInterval);
     volumeInterval = null;
+  }
+
+  if (pipeline) {
+    console.log("[ClearVoice Offscreen] Final pipeline stats:", pipeline.getStats());
+    pipeline.reset();
+    pipeline = null;
+  }
+
+  if (workletNode) {
+    workletNode.port.onmessage = null;
+    workletNode.disconnect();
+    workletNode = null;
   }
 
   if (analyserNode) {
