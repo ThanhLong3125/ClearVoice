@@ -1,0 +1,50 @@
+name: ClearVoice Release (CD)
+
+# Chỉ kích hoạt khi bạn tạo và push một git tag mới có tiền tố 'v' (ví dụ: v0.1.0, v0.1.1, v1.0.0)
+on:
+  push:
+    tags:
+      - 'v*'
+
+# Cấp quyền ghi nội dung để GitHub Actions có thể tạo Release và tải file zip lên
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Publish Release Package
+    runs-on: ubuntu-latest
+
+    steps:
+      # Bước 1: Kéo code ở đúng phiên bản của tag này
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Bước 2: Thiết lập Node.js 22 và cache npm
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      # Bước 3: Cài đặt dependencies sạch
+      - name: Install dependencies
+        run: npm ci
+
+      # Bước 4: Kiểm tra TypeScript & Build extension ra thư mục dist/
+      - name: Build Extension
+        run: npm run build
+
+      # Bước 5: Nén toàn bộ nội dung thư mục dist/ thành file zip
+      - name: Package extension into zip
+        run: |
+          cd dist
+          zip -r ../ClearVoice-${{ github.ref_name }}.zip .
+          cd ..
+
+      # Bước 6: Tự động xuất bản GitHub Release và đính kèm file zip
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ClearVoice-${{ github.ref_name }}.zip
+          generate_release_notes: true
