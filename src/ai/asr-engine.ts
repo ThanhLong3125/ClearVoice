@@ -290,6 +290,8 @@ export class LocalAsrEngine {
         text = output.text.trim();
       }
 
+      text = this.cleanHallucinatedText(text);
+
       this.state = "ready";
       this.isProcessing = false;
 
@@ -320,5 +322,20 @@ export class LocalAsrEngine {
       console.error("[ClearVoice AI] Inference error:", err);
       return null;
     }
+  }
+
+  /**
+   * Filters out common Whisper non-speech hallucinations and collapses repetitive phrase loops.
+   */
+  private cleanHallucinatedText(raw: string): string {
+    if (!raw) return "";
+    // Remove bracketed/parenthesized noise tags such as [Music], (nhạc), [Applause]
+    let cleaned = raw.replace(/\[[^\]]*\]|\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
+    if (!cleaned || /^[\p{P}\p{S}\s]+$/u.test(cleaned)) {
+      return "";
+    }
+    // Collapse consecutive 3+ repetitions of the same word/phrase (e.g. "bây giờ, bây giờ, bây giờ")
+    cleaned = cleaned.replace(/\b(\w+(?:[\s,]+\w+){0,2})(?:[\s,]+\1){2,}\b/giu, "$1");
+    return cleaned.trim();
   }
 }

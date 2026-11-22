@@ -17,8 +17,10 @@
 | **BUG-007** | Không bật nhạc mà Hàng đợi Queue vẫn bị dâng lên `5/5` | Âm thanh im lặng (Silence) trong PCM là chuỗi số 0 liên tục | Tích hợp bộ lọc năng lượng `EnergyVad` chặn chunk im lặng | ✅ Đã sửa |
 | **BUG-008** | Chunk âm thanh bị rơi mất khi AI đang bận suy luận | Gọi inference trực tiếp trong event `onChunkReady` gây race condition | Xây dựng vòng lặp tiêu thụ độc lập `runAsrConsumerLoop()` (FIFO) | ✅ Đã sửa |
 | **BUG-009** | Nhận diện tiếng Việt bị chậm hoặc sai ngôn ngữ | Không chỉ định ngôn ngữ khiến Whisper phải chạy bước đoán ngôn ngữ | Thêm dropdown chọn ngôn ngữ, truyền trực tiếp `language: "vietnamese"` | ✅ Đã sửa |
-| **BUG-010** | Content Script (`content.js`) không chạy, không hiện phụ đề hay badge trên trang | Vite tách `messages.ts` thành shared ES module chunk khiến `dist/content.js` có câu lệnh `import`, nhưng Chrome chạy content script ở chế độ classic script | Chuyển `MessageType` sang `const enum` để inline hoàn toàn lúc compile và thêm chốt chống inject trùng lặp | ✅ Đã sửa |
+| **BUG-010** | Content Script (`content.js`) không chạy, không hiện phụ đề hay badge trên trang | Vite tách `messages.ts` thành shared ES module chunk khiến `dist/content.js` có câu lệnh `import`, nhưng Chrome chạy content script ở chế độ classic script | Loại bỏ runtime import trong `overlay.ts` và thêm chốt chống inject trùng lặp | ✅ Đã sửa |
 | **BUG-011** | Giao diện Popup che mất lỗi khởi tạo AI, kẹt mãi ở dòng `Tải ... (0%)` | `pipeline()` tải nhiều file song song (`Promise.all`); khi model ném lỗi, các file config vẫn bắn sự kiện `loading` ghi đè trạng thái `error` | Chặn mọi sự kiện progress khi `state !== "loading"` và cho phép retry khi khởi tạo thất bại | ✅ Đã sửa |
+| **BUG-012** | Giao diện Popup bị khựng/đơ khi bấm vào icon Extension lúc AI đang chạy & chọn Tiếng Anh vẫn dịch ra Tiếng Việt | `offscreen.html` và `popup/index.html` dùng chung Main UI Thread của Extension Process; `modeling_whisper.js` chưa cài đặt auto language detection | Tách toàn bộ Whisper WASM sang Web Worker (`asr-worker.ts`) và viết `WhisperAutoLangLogitsProcessor` tự nhận diện đa ngôn ngữ 1 bước | ✅ Đã sửa |
+| **BUG-013** | Phụ đề bị trễ 2–3 câu so với video, turn đầu bịa chữ ở cuối câu rồi turn sau mới chuẩn | Cửa sổ trượt cố định (`window 3s, hop 1s`) cắt đứt ngang âm tiết và chồng lấp 2s (bắt AI dịch lặp 3 lần) kết hợp hàng đợi FIFO `5/5` | Thay bằng `Dynamic VAD-Pause & Minimum-Energy Valley Chunker` (0% chồng lấp, cắt tại điểm ngắt hơi/năng lượng cực tiểu) và hàng đợi `Coalesce & Drop-Stale` | ✅ Đã sửa |
 
 ---
 
@@ -63,3 +65,33 @@
 * **Cách xử lý:**
   - Kiểm tra chặt điều kiện `if (this.state !== "loading" || typeof data.progress !== "number") return;` trước khi phát sự kiện tiến trình.
   - Tại `service-worker.ts` và `offscreen.ts`, chặn các bản tin `loading` trễ nếu trạng thái đã chuyển sang `error`, đồng thời cho phép tự động khởi tạo lại (`retry`) ở lần bấm thu âm tiếp theo.
+
+---
+
+### 4. BUG-012: Nghẽn luồng giao diện chính (Main UI Thread Blocking) & Thiếu cơ chế Tự nhận diện ngôn ngữ trong Transformers.js v4
+* **Triệu chứng:**
+  1. Khi AI đang nạp mô hình hoặc đang dịch phụ đề, người dùng click vào biểu tượng ClearVoice trên thanh công cụ Chrome bị khựng/đơ từ 1–2 giây mới mở được Popup.
+  2. Khi người dùng chọn ngôn ngữ `English`, hệ thống vẫn phiên âm ra Tiếng Việt; hoặc nếu bỏ trống `language`, thư viện mặc định ép về `'en'`.
+* **Nguyên nhân gốc rễ:**
+  1. Trong Chromium, mọi trang thuộc cùng một Extension Origin (`chrome-extension://<id>/...`, bao gồm `offscreen.html` và `popup/index.html`) chạy chung trong **cùng một tiến trình Renderer và chia sẻ chung Main UI Thread**. Khi ONNX Runtime Web chạy suy luận WASM trực tiếp trên luồng chính của `offscreen.html`, nó khóa cứng luồng giao diện của toàn bộ Extension trong suốt thời gian suy luận (500ms – 1500ms).
+  2. Trong mã nguồn `@huggingface/transformers` v4 (`src/models/whisper/modeling_whisper.js`, hàm `_retrieve_init_tokens`), khi không truyền `language`, thư viện chưa cài đặt nhận diện ngôn ngữ tự động (`// TODO: Implement language detection`) mà gán cứng `language = 'en'`.
+* **Cách xử lý:**
+  1. **Tách AI sang Dedicated Web Worker (`src/offscreen/asr-worker.ts`):** Toàn bộ quá trình tải mô hình, khởi tạo session ONNX và suy luận WASM được đẩy sang luồng OS Worker độc lập. File `offscreen.js` trên luồng chính giảm từ 574 KB xuống chỉ còn **9.7 KB**, giúp giao diện Popup mở tức thì (< 16ms) ở mọi thời điểm.
+  2. **Cài đặt `WhisperAutoLangLogitsProcessor` (`src/ai/asr-engine.ts`):** Khởi tạo giải mã từ token `[<|startoftranscript|>]` (`50258`) và dùng `LogitsProcessor` tại bước 1 để mạng cross-attention của Whisper tự động chọn token ngôn ngữ có xác suất cao nhất từ âm thanh (`<|vi|>`, `<|en|>`, `<|zh|>`, `<|ja|>`, `<|ko|>`, v.v.), sau đó ép `<|transcribe|>` ở bước 2 và `<|notimestamps|>` ở bước 3 ngay trong cùng một lượt chạy.
+
+---
+
+### 5. BUG-013: Trễ phụ đề dây chuyền 2–3 câu & Hiện tượng "Turn đầu bịa chữ, turn sau mới chuẩn"
+* **Triệu chứng:** Khi nghe podcast hoặc hội thoại liên tục, phụ đề hiển thị chậm hơn tiếng nói thật từ 2 đến 3 câu (7–12 giây). Ngoài ra, ở cuối mỗi câu phụ đề thường xuất hiện chữ bịa/sai, phải đợi lượt cập nhật tiếp theo chữ đó mới chuẩn.
+* **Nguyên nhân gốc rễ:**
+  1. **Cắt đứt ngang âm tiết (Mid-word Slicing):** Bộ cắt `SlidingWindowChunker` cũ cắt cứng theo đồng hồ (`window = 3.0s`, `hop = 1.0s`). Khi vết cắt rơi trúng giữa một chữ đang phát âm dở (ví dụ `"phỏng v-"`), mô hình ngôn ngữ của Whisper sẽ tự suy diễn (hallucinate) để lấp đầy âm tiết bị cụt. Đến lượt tiếp theo (1 giây sau), nhờ có 2 giây chồng lấp nên chữ đó mới nằm trọn trong khung và được dịch đúng.
+  2. **Chồng lấp 66% (2.0s Overlap) + Hàng đợi FIFO `5/5`:** Cứ 1 giây thực tế lại sinh ra 1 chunk dài 3 giây (bắt AI dịch đi dịch lại mỗi câu 3 lần). Tốc độ sinh chunk (1 chunk/1s) nhanh gấp đôi tốc độ giải mã của WASM (~2s/chunk), làm hàng đợi FIFO luôn đầy `5/5` và bắt AI luôn phải dịch các chunk cũ từ 5 bước trước.
+* **Cách xử lý:**
+  1. **Nâng cấp lên `Dynamic VAD-Pause & Minimum-Energy Valley Chunker` (`src/audio/chunker.ts`) với 0% chồng lấp:**
+     - Quét năng lượng âm thanh theo từng khung `32ms` (`512 samples` @ 16kHz) và tự động cắt gọn khoảng lặng thừa trước khi người nói bắt đầu (chỉ giữ `160ms` pre-roll để không mất phụ âm đầu).
+     - Ngay khi phát hiện người nói ngắt nhịp/lấy hơi tự nhiên (`>= 260ms` im lặng sau ít nhất `1.2s` tiếng nói), lập tức cắt thành một chunk câu hoàn chỉnh với **0% chồng lấp**.
+     - Nếu người nói phát âm nhanh liên tục chạm ngưỡng `3.2s` mà không nghỉ, thuật toán tự động quét ngược `0.75s` cuối để tìm đúng khung `32ms` có **năng lượng RMS cực tiểu** (điểm chuyển tiếp giữa hai âm tiết) để đặt vết cắt, tuyệt đối không cắt ngang nguyên âm đang phát âm.
+  2. **Cơ chế Hàng đợi `Coalesce & Drop-Stale` (`src/audio/pipeline.ts` & `src/audio/queue.ts`):**
+     - Khi AI Worker vừa rảnh, nếu có 2 cụm từ ngắn đang chờ mà tổng thời lượng `<= 3.5s`, hệ thống tự động nối (`coalesce`) chúng thành 1 lần dịch duy nhất để không mất chữ mà vẫn bắt kịp thời gian thực.
+     - Nếu tổng âm thanh chờ vượt quá `3.5s`, tự động xả bỏ (`drop-stale`) các chunk cũ quá hạn để phụ đề luôn bám sát câu đang nói hiện tại.
+

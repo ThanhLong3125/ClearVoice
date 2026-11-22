@@ -178,9 +178,9 @@ async function handleInitAudioCapture(streamId: string, sessionId: string): Prom
         chrome.runtime.sendMessage<ExtensionMessage>({
           type: MessageType.PIPELINE_METRICS,
           totalChunks: stats.totalEmittedChunks,
-          durationSec: Number((stats.totalEmittedChunks * 1.0).toFixed(1)),
+          durationSec: Number((stats.totalEmittedChunks * 2.5).toFixed(1)),
           queueDepth: stats.queueMetrics.currentDepth,
-          queueCapacity: 5,
+          queueCapacity: stats.queueMetrics.maxCapacity,
           isSpeechActive: stats.isSpeechActive,
           silenceChunksFiltered: stats.silenceChunksFiltered,
         }).catch(() => {});
@@ -198,12 +198,12 @@ async function handleInitAudioCapture(streamId: string, sessionId: string): Prom
     pipeline = new AudioPipeline(sessionId, {
       sourceSampleRate: audioContext.sampleRate,
       targetSampleRate: 16000,
-      windowDurationSec: 3.0,
-      hopDurationSec: 1.0,
-      maxQueueCapacity: 5,
+      windowDurationSec: 3.2,
+      hopDurationSec: 3.2,
+      maxQueueCapacity: 2,
       onChunkReady: (chunk) => {
         console.log(
-          `[ClearVoice Pipeline] Active Speech Chunk #${chunk.sequence} | Timeline: ${(chunk.startSample / 16000).toFixed(2)}s`
+          `[ClearVoice Pipeline] Phrase Chunk #${chunk.sequence} | Duration: ${(chunk.samples.length / 16000).toFixed(2)}s | Timeline: ${(chunk.startSample / 16000).toFixed(2)}s`
         );
       },
     });

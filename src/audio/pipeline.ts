@@ -8,22 +8,24 @@ import type { AudioChunk } from "../types/audio";
 export interface AudioPipelineConfig {
   sourceSampleRate: number; // e.g. 48000
   targetSampleRate: number; // e.g. 16000
-  windowDurationSec: number;// e.g. 3.0
-  hopDurationSec: number;   // e.g. 1.0
-  maxQueueCapacity: number; // e.g. 5
-  vadThresholdRms?: number; // default: 0.003
+  windowDurationSec: number;// Max chunk duration (e.g. 3.2s)
+  hopDurationSec: number;   // Kept for interface compatibility
+  maxQueueCapacity: number; // e.g. 2
+  vadThresholdRms?: number; // default: 0.004
   onChunkReady?: (chunk: AudioChunk) => void;
 }
 
 /**
  * AudioPipeline: Coordinates format conversion, streaming resampling,
- * VAD silence filtering, sliding-window chunking, and backpressure queueing.
+ * dynamic VAD-pause segmentation (0% overlap), and low-latency drop-stale queueing.
  */
 export class AudioPipeline {
   private readonly resampler: StreamResampler;
   private readonly chunker: SlidingWindowChunker;
   private readonly queue: BoundedQueue<AudioChunk>;
   private readonly vad: EnergyVad;
+  private readonly targetSampleRate: number;
+  private readonly maxCoalescedSamples: number;
   private readonly onChunkReady?: (chunk: AudioChunk) => void;
 
   private totalInputFrames: number = 0;
@@ -31,21 +33,24 @@ export class AudioPipeline {
   private silenceChunksFiltered: number = 0;
 
   constructor(sessionId: string, config: AudioPipelineConfig) {
+    this.targetSampleRate = config.targetSampleRate;
+    this.maxCoalescedSamples = Math.round(3.5 * config.targetSampleRate);
     this.resampler = new StreamResampler(config.sourceSampleRate, config.targetSampleRate);
 
     const chunkerConfig: SlidingWindowConfig = {
       sampleRate: config.targetSampleRate,
       windowDurationSec: config.windowDurationSec,
       hopDurationSec: config.hopDurationSec,
+      speechThresholdRms: config.vadThresholdRms ?? 0.004,
     };
     this.chunker = new SlidingWindowChunker(sessionId, chunkerConfig);
     this.queue = new BoundedQueue<AudioChunk>(config.maxQueueCapacity);
-    this.vad = new EnergyVad({ thresholdRms: config.vadThresholdRms ?? 0.003 });
+    this.vad = new EnergyVad({ thresholdRms: config.vadThresholdRms ?? 0.004, hangoverMs: 400 });
     this.onChunkReady = config.onChunkReady;
   }
 
   /**
-   * Feed raw multi-channel audio frames (e.g. from AudioWorklet) into the pipeline.
+   * Feed raw multi-channel audio frames (from AudioWorklet) into the pipeline.
    */
   public pushFrames(channels: Float32Array[]): void {
     if (channels.length === 0) return;
@@ -54,17 +59,18 @@ export class AudioPipeline {
     // 1. Downmix stereo -> mono
     const mono = downmixToMono(channels);
 
-    // 2. Continuous resampling (e.g. 48kHz -> 16kHz)
+    // 2. Update live VAD state indicator on incoming audio
+    this.vad.process(mono);
+
+    // 3. Continuous resampling (e.g. 48kHz -> 16kHz)
     const resampled = this.resampler.process(mono);
 
-    // 3. Sliding window chunking
+    // 4. Dynamic VAD-pause & minimum-energy valley segmentation (0% overlap)
     const newChunks = this.chunker.push(resampled);
 
-    // 4. VAD silence filtering before queueing
     for (const chunk of newChunks) {
-      const vadResult = this.vad.process(chunk.samples);
-      if (!vadResult.isActive) {
-        // Drop pure silence chunk to protect AI from hallucination and preserve queue capacity
+      const vadCheck = this.vad.process(chunk.samples);
+      if (!vadCheck.isActive && vadCheck.rms < 0.003) {
         this.silenceChunksFiltered++;
         continue;
       }
@@ -77,23 +83,62 @@ export class AudioPipeline {
     }
   }
 
-  /**
-   * Check if speech activity is currently active.
-   */
   public isSpeechActive(): boolean {
     return this.vad.speechActive;
   }
 
   /**
-   * Dequeue next chunk for AI inference.
+   * Dequeue the latest speech for AI inference:
+   * - If 1 chunk is waiting, returns it immediately.
+   * - If 2 short chunks arrived while AI was busy and their combined duration <= 3.5s,
+   *   coalesces them into one contiguous phrase so no words are lost AND latency stays real-time.
+   * - If total queued audio exceeds 3.5s, drops the oldest chunk(s) and returns only the newest chunk.
    */
   public nextChunk(): AudioChunk | undefined {
-    return this.queue.dequeue();
+    const pending = this.queue.drainAll();
+    if (pending.length === 0) return undefined;
+    if (pending.length === 1) return pending[0];
+
+    // Walk backwards from the newest chunk, keeping as many recent chunks as fit within 3.5s
+    const kept: AudioChunk[] = [];
+    let totalSamples = 0;
+
+    for (let i = pending.length - 1; i >= 0; i--) {
+      const candidate = pending[i];
+      if (kept.length === 0 || totalSamples + candidate.samples.length <= this.maxCoalescedSamples) {
+        kept.unshift(candidate);
+        totalSamples += candidate.samples.length;
+      } else {
+        this.queue.recordDropped(1);
+      }
+    }
+
+    if (kept.length === 1) {
+      return kept[0];
+    }
+
+    // Merge contiguous kept chunks into a single phrase chunk
+    const mergedSamples = new Float32Array(totalSamples);
+    let offset = 0;
+    for (const c of kept) {
+      mergedSamples.set(c.samples, offset);
+      offset += c.samples.length;
+    }
+
+    const first = kept[0];
+    const last = kept[kept.length - 1];
+    return {
+      sessionId: first.sessionId,
+      sequence: last.sequence,
+      startSample: first.startSample,
+      sampleRate: this.targetSampleRate,
+      channels: 1,
+      format: "f32",
+      samples: mergedSamples,
+      capturedAtMonotonicMs: last.capturedAtMonotonicMs,
+    };
   }
 
-  /**
-   * Diagnostic statistics.
-   */
   public getStats(): {
     totalInputFrames: number;
     totalEmittedChunks: number;
@@ -110,9 +155,6 @@ export class AudioPipeline {
     };
   }
 
-  /**
-   * Reset pipeline for clean stop.
-   */
   public reset(): void {
     this.resampler.reset();
     this.chunker.reset();

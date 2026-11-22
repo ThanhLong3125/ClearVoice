@@ -1,6 +1,6 @@
 /**
- * BoundedQueue: A fixed-capacity queue with observable metrics and drop policy.
- * Prevents memory leaks and backpressure buildup when AI inference is slower than real-time audio.
+ * BoundedQueue: A fixed-capacity queue with observable metrics and drop-stale policy.
+ * Prevents latency accumulation when AI inference is temporarily slower than incoming audio.
  */
 export interface QueueMetrics {
   currentDepth: number;
@@ -17,7 +17,7 @@ export class BoundedQueue<T> {
   private totalDequeued: number = 0;
   private droppedCount: number = 0;
 
-  constructor(maxCapacity: number = 5) {
+  constructor(maxCapacity: number = 2) {
     if (maxCapacity <= 0) {
       throw new Error(`Capacity must be positive: got ${maxCapacity}`);
     }
@@ -26,13 +26,11 @@ export class BoundedQueue<T> {
 
   /**
    * Enqueue an item. If capacity is exceeded, drops the oldest item to maintain real-time relevance.
-   * Returns true if queued without dropping, false if an item was dropped.
    */
   public enqueue(item: T): boolean {
     this.totalEnqueued++;
 
     if (this.items.length >= this.maxCapacity) {
-      // Drop oldest chunk
       this.items.shift();
       this.droppedCount++;
       this.items.push(item);
@@ -44,7 +42,7 @@ export class BoundedQueue<T> {
   }
 
   /**
-   * Dequeue the next available item, or undefined if empty.
+   * Dequeue the oldest available item (FIFO).
    */
   public dequeue(): T | undefined {
     if (this.items.length === 0) return undefined;
@@ -53,8 +51,34 @@ export class BoundedQueue<T> {
   }
 
   /**
-   * Peek at the front item without removing it.
+   * Dequeue the NEWEST item and drop any older stale items waiting in the queue.
+   * Guarantees real-time synchronization without multi-sentence lag buildup.
    */
+  public dequeueLatest(): T | undefined {
+    if (this.items.length === 0) return undefined;
+    const latest = this.items.pop()!;
+    if (this.items.length > 0) {
+      this.droppedCount += this.items.length;
+      this.items.length = 0;
+    }
+    this.totalDequeued++;
+    return latest;
+  }
+
+  /**
+   * Drain all currently queued items in chronological order and empty the queue.
+   */
+  public drainAll(): T[] {
+    if (this.items.length === 0) return [];
+    const all = this.items.splice(0, this.items.length);
+    this.totalDequeued += all.length;
+    return all;
+  }
+
+  public recordDropped(count: number): void {
+    this.droppedCount += count;
+  }
+
   public peek(): T | undefined {
     return this.items[0];
   }
@@ -71,9 +95,6 @@ export class BoundedQueue<T> {
     return this.items.length >= this.maxCapacity;
   }
 
-  /**
-   * Get current queue diagnostic metrics.
-   */
   public getMetrics(): QueueMetrics {
     return {
       currentDepth: this.items.length,
@@ -84,9 +105,6 @@ export class BoundedQueue<T> {
     };
   }
 
-  /**
-   * Clear all items and reset metrics.
-   */
   public clear(): void {
     this.items.length = 0;
     this.totalEnqueued = 0;
