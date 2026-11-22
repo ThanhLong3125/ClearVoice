@@ -12,8 +12,6 @@ const volumePercent = document.getElementById("volumePercent") as HTMLSpanElemen
 const pipelineStats = document.getElementById("pipelineStats") as HTMLDivElement;
 const statModel = document.getElementById("statModel") as HTMLElement;
 const statVad = document.getElementById("statVad") as HTMLElement;
-const statChunks = document.getElementById("statChunks") as HTMLElement;
-const statSilence = document.getElementById("statSilence") as HTMLElement;
 const statQueue = document.getElementById("statQueue") as HTMLElement;
 const subtitleCard = document.getElementById("subtitleCard") as HTMLDivElement;
 const popupSubtitle = document.getElementById("popupSubtitle") as HTMLDivElement;
@@ -89,13 +87,9 @@ function resetStats(): void {
     statVad.textContent = "Chờ âm thanh...";
     statVad.style.color = "#94a3b8";
   }
-  if (statChunks) statChunks.textContent = "0";
-  if (statSilence) statSilence.textContent = "0 chunks";
-  if (statQueue) statQueue.textContent = "0/5";
+  if (statQueue) statQueue.textContent = "0/5 (0 chunks)";
   if (popupSubtitle) popupSubtitle.textContent = "Đang lắng nghe...";
 }
-
-const selectLang = document.getElementById("selectLang") as HTMLSelectElement;
 
 function updateModelUI(modelStatus?: {
   status: "idle" | "loading" | "ready" | "error";
@@ -127,14 +121,6 @@ function updateModelUI(modelStatus?: {
     statModel.style.color = "#94a3b8";
   }
 }
-
-selectLang?.addEventListener("change", () => {
-  const language = selectLang.value;
-  chrome.runtime.sendMessage<ExtensionMessage>({
-    type: MessageType.SET_LANGUAGE,
-    language,
-  }).catch(() => {});
-});
 
 // Request initial status when popup opens
 chrome.runtime.sendMessage<ExtensionMessage>({ type: MessageType.GET_STATUS }, (response) => {
@@ -176,9 +162,9 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage) => {
         statVad.style.color = "#94a3b8";
       }
     }
-    if (statChunks) statChunks.textContent = String(message.totalChunks);
-    if (statSilence) statSilence.textContent = `${message.silenceChunksFiltered} chunks`;
-    if (statQueue) statQueue.textContent = `${message.queueDepth}/${message.queueCapacity}`;
+    if (statQueue) {
+      statQueue.textContent = `${message.queueDepth}/${message.queueCapacity} (${message.totalChunks} chunks)`;
+    }
   }
 });
 

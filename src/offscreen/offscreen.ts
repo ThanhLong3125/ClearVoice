@@ -1,6 +1,7 @@
 import { MessageType, type ExtensionMessage } from "../types/messages";
 import { AudioPipeline } from "../audio/pipeline";
-import { LocalAsrEngine } from "../ai/asr-engine";
+import type { AudioChunk, TranscriptSegment } from "../types/audio";
+import type { WorkerInMessage, WorkerOutMessage } from "./asr-worker";
 
 let currentStream: MediaStream | null = null;
 let audioContext: AudioContext | null = null;
@@ -9,11 +10,83 @@ let analyserNode: AnalyserNode | null = null;
 let workletNode: AudioWorkletNode | null = null;
 let volumeInterval: number | null = null;
 let pipeline: AudioPipeline | null = null;
-let asrEngine: LocalAsrEngine | null = null;
 let consumerLoopActive: boolean = false;
 
+// Dedicated Web Worker for ASR so WASM never blocks the Extension UI thread
+let asrWorker: Worker | null = null;
+let workerState: "idle" | "loading" | "ready" | "error" = "idle";
+let nextRequestId = 1;
+const pendingRequests = new Map<number, (segment: TranscriptSegment | null) => void>();
+let lastProgressSentAt = 0;
+
+function ensureAsrWorker(): void {
+  if (!asrWorker) {
+    asrWorker = new Worker(new URL("./asr-worker.ts", import.meta.url), { type: "module" });
+    asrWorker.onmessage = (event: MessageEvent<WorkerOutMessage>) => {
+      const msg = event.data;
+      if (!msg) return;
+
+      if (msg.type === "PROGRESS") {
+        if (workerState !== "loading") return;
+        const now = performance.now();
+        if (now - lastProgressSentAt < 150 && msg.progress.progress < 100) {
+          return;
+        }
+        lastProgressSentAt = now;
+        chrome.runtime.sendMessage<ExtensionMessage>({
+          type: MessageType.MODEL_STATUS,
+          status: "loading",
+          progress: msg.progress.progress,
+          file: msg.progress.file,
+        }).catch(() => {});
+      } else if (msg.type === "READY") {
+        workerState = "ready";
+        chrome.runtime.sendMessage<ExtensionMessage>({
+          type: MessageType.MODEL_STATUS,
+          status: "ready",
+          device: msg.device,
+        }).catch(() => {});
+      } else if (msg.type === "ERROR") {
+        workerState = "error";
+        chrome.runtime.sendMessage<ExtensionMessage>({
+          type: MessageType.MODEL_STATUS,
+          status: "error",
+          error: msg.error,
+        }).catch(() => {});
+      } else if (msg.type === "RESULT") {
+        const resolver = pendingRequests.get(msg.requestId);
+        if (resolver) {
+          pendingRequests.delete(msg.requestId);
+          resolver(msg.segment);
+        }
+      }
+    };
+  }
+
+  if (workerState !== "ready" && workerState !== "loading") {
+    workerState = "loading";
+    asrWorker.postMessage({ type: "INIT" } satisfies WorkerInMessage);
+  }
+}
+
+function transcribeInWorker(chunk: AudioChunk): Promise<TranscriptSegment | null> {
+  return new Promise((resolve) => {
+    if (!asrWorker || workerState !== "ready") {
+      resolve(null);
+      return;
+    }
+    const requestId = nextRequestId++;
+    pendingRequests.set(requestId, resolve);
+    asrWorker.postMessage({
+      type: "TRANSCRIBE",
+      requestId,
+      chunk,
+    } satisfies WorkerInMessage);
+  });
+}
+
 /**
- * Dedicated Consumer Loop: Pulls audio chunks from bounded queue and transcribes them in FIFO order.
+ * Dedicated Consumer Loop: Pulls audio chunks from bounded queue and dispatches them to the ASR Web Worker.
  */
 async function runAsrConsumerLoop(): Promise<void> {
   if (consumerLoopActive) return;
@@ -21,11 +94,11 @@ async function runAsrConsumerLoop(): Promise<void> {
   console.log("[ClearVoice Offscreen] ASR Consumer Loop started.");
 
   while (consumerLoopActive) {
-    if (asrEngine && asrEngine.isReady() && pipeline) {
+    if (workerState === "ready" && pipeline) {
       const chunk = pipeline.nextChunk();
       if (chunk) {
         try {
-          const segment = await asrEngine.transcribe(chunk);
+          const segment = await transcribeInWorker(chunk);
           if (segment && segment.text) {
             console.log(`[ClearVoice ASR] Subtitle emitted: "${segment.text}"`);
             chrome.runtime.sendMessage<ExtensionMessage>({
@@ -36,11 +109,10 @@ async function runAsrConsumerLoop(): Promise<void> {
         } catch (err) {
           console.error("[ClearVoice ASR] Error in consumer loop:", err);
         }
-        continue; // Process next chunk immediately
+        continue;
       }
     }
-    // Yield 100ms when queue is empty or model is loading/inferring
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 120));
   }
   console.log("[ClearVoice Offscreen] ASR Consumer Loop stopped.");
 }
@@ -52,7 +124,6 @@ async function handleInitAudioCapture(streamId: string, sessionId: string): Prom
   try {
     currentSessionId = sessionId;
 
-    // Request tab audio stream using chromeMediaSourceId constraint
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         mandatory: {
@@ -65,7 +136,6 @@ async function handleInitAudioCapture(streamId: string, sessionId: string): Prom
 
     currentStream = stream;
 
-    // Track state change listener
     stream.getAudioTracks().forEach((track) => {
       track.onended = () => {
         console.warn("[ClearVoice Offscreen] Audio track ended unexpectedly.");
@@ -73,22 +143,19 @@ async function handleInitAudioCapture(streamId: string, sessionId: string): Prom
       };
     });
 
-    // Initialize AudioContext
     audioContext = new AudioContext();
-
     const sourceNode = audioContext.createMediaStreamSource(stream);
 
-    // CRITICAL 1: Connect to audioContext.destination so the user still hears tab audio
+    // 1. Passthrough so user hears tab audio normally
     sourceNode.connect(audioContext.destination);
 
-    // CRITICAL 2: Connect to AnalyserNode to read real-time PCM frames and calculate RMS
+    // 2. Real-time volume & pipeline stats (throttled to 250ms to keep IPC & Popup responsive)
     analyserNode = audioContext.createAnalyser();
     analyserNode.fftSize = 256;
     sourceNode.connect(analyserNode);
 
     const buffer = new Float32Array(analyserNode.fftSize);
 
-    // Stream volume updates every 70ms
     volumeInterval = window.setInterval(() => {
       if (!analyserNode) return;
       analyserNode.getFloatTimeDomainData(buffer);
@@ -98,7 +165,6 @@ async function handleInitAudioCapture(streamId: string, sessionId: string): Prom
         sum += buffer[i] * buffer[i];
       }
       const rms = Math.sqrt(sum / buffer.length);
-      // Amplify RMS to human-observable volume percentage 0 - 100%
       const volume = Math.min(100, Math.round(rms * 250));
 
       chrome.runtime.sendMessage<ExtensionMessage>({
@@ -107,56 +173,27 @@ async function handleInitAudioCapture(streamId: string, sessionId: string): Prom
         rms: Number(rms.toFixed(4)),
       }).catch(() => {});
 
-      // Periodically update pipeline status (speech active & queue depth)
       if (pipeline) {
         const stats = pipeline.getStats();
         chrome.runtime.sendMessage<ExtensionMessage>({
           type: MessageType.PIPELINE_METRICS,
           totalChunks: stats.totalEmittedChunks,
-          durationSec: Number(((stats.totalEmittedChunks * 16000) / 16000).toFixed(1)),
+          durationSec: Number((stats.totalEmittedChunks * 1.0).toFixed(1)),
           queueDepth: stats.queueMetrics.currentDepth,
           queueCapacity: 5,
           isSpeechActive: stats.isSpeechActive,
           silenceChunksFiltered: stats.silenceChunksFiltered,
         }).catch(() => {});
       }
-    }, 100);
+    }, 250);
 
-    // CRITICAL 3: Initialize AudioWorklet & Audio Processing Pipeline
+    // 3. Initialize AudioWorklet & Audio Processing Pipeline
     const workletUrl = chrome.runtime.getURL("audio-processor.js");
     await audioContext.audioWorklet.addModule(workletUrl);
     workletNode = new AudioWorkletNode(audioContext, "audio-stream-processor");
 
-    // CRITICAL 4: Initialize or warm up Local AI ASR Engine (Whisper)
-    if (!asrEngine) {
-      asrEngine = new LocalAsrEngine();
-    }
-    if (!asrEngine.isReady() && asrEngine.getState() !== "loading") {
-      asrEngine
-        .initialize((progressInfo) => {
-          if (asrEngine?.getState() !== "loading") return;
-          chrome.runtime.sendMessage<ExtensionMessage>({
-            type: MessageType.MODEL_STATUS,
-            status: "loading",
-            progress: progressInfo.progress,
-            file: progressInfo.file,
-          }).catch(() => {});
-        })
-        .then(() => {
-          chrome.runtime.sendMessage<ExtensionMessage>({
-            type: MessageType.MODEL_STATUS,
-            status: "ready",
-            device: asrEngine?.getDevice(),
-          }).catch(() => {});
-        })
-        .catch((err) => {
-          chrome.runtime.sendMessage<ExtensionMessage>({
-            type: MessageType.MODEL_STATUS,
-            status: "error",
-            error: err instanceof Error ? err.message : String(err),
-          }).catch(() => {});
-        });
-    }
+    // 4. Warm up Local AI ASR Engine in background Web Worker
+    ensureAsrWorker();
 
     pipeline = new AudioPipeline(sessionId, {
       sourceSampleRate: audioContext.sampleRate,
@@ -165,25 +202,12 @@ async function handleInitAudioCapture(streamId: string, sessionId: string): Prom
       hopDurationSec: 1.0,
       maxQueueCapacity: 5,
       onChunkReady: (chunk) => {
-        const stats = pipeline?.getStats();
         console.log(
-          `[ClearVoice Pipeline] Active Speech Chunk #${chunk.sequence} | Samples: ${chunk.samples.length} (3.0s @ 16kHz) | Timeline: ${(chunk.startSample / 16000).toFixed(2)}s`
+          `[ClearVoice Pipeline] Active Speech Chunk #${chunk.sequence} | Timeline: ${(chunk.startSample / 16000).toFixed(2)}s`
         );
-
-        // Broadcast pipeline metrics to popup UI
-        chrome.runtime.sendMessage<ExtensionMessage>({
-          type: MessageType.PIPELINE_METRICS,
-          totalChunks: chunk.sequence + 1,
-          durationSec: Number(((chunk.startSample + chunk.samples.length) / 16000).toFixed(1)),
-          queueDepth: stats ? stats.queueMetrics.currentDepth : 1,
-          queueCapacity: 5,
-          isSpeechActive: true,
-          silenceChunksFiltered: stats ? stats.silenceChunksFiltered : 0,
-        }).catch(() => {});
       },
     });
 
-    // Start consumer loop to process chunks from queue
     runAsrConsumerLoop();
 
     workletNode.port.onmessage = (event: MessageEvent<{ channels: Float32Array[] }>) => {
@@ -203,7 +227,7 @@ async function handleInitAudioCapture(streamId: string, sessionId: string): Prom
       type: MessageType.STATUS_UPDATE,
       state: "error",
       error: err instanceof Error ? err.message : String(err),
-    });
+    }).catch(() => {});
   }
 }
 
@@ -244,7 +268,6 @@ function stopAudioCapture(): void {
     audioContext = null;
   }
 
-  // Send zero volume when stopping
   chrome.runtime.sendMessage<ExtensionMessage>({
     type: MessageType.AUDIO_VOLUME,
     volume: 0,
@@ -264,12 +287,6 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage) => {
 
     case MessageType.STOP_AUDIO_CAPTURE:
       stopAudioCapture();
-      break;
-
-    case MessageType.SET_LANGUAGE:
-      if (asrEngine) {
-        asrEngine.setLanguage(message.language);
-      }
       break;
   }
 });

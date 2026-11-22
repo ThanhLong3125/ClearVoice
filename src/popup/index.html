@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="vi">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -9,13 +9,13 @@
 <body>
   <div class="header">
     <h1 class="title">ClearVoice</h1>
-    <span class="version">v0.1.0 (MVP)</span>
+    <span class="version">v0.1.0 • Auto-Lang</span>
   </div>
 
   <div class="card">
     <div class="status-row">
       <div id="statusDot" class="status-dot idle"></div>
-      <span id="statusText">Trạng thái: Chưa hoạt động</span>
+      <span id="statusText">Trạng thái: Sẵn sàng</span>
     </div>
 
     <div class="volume-container" id="volumeContainer" style="display: none;">
@@ -27,18 +27,9 @@
         <div id="volumeBar" class="volume-bar-fill"></div>
       </div>
 
-      <div class="lang-row">
-      <label for="selectLang">Ngôn ngữ ASR:</label>
-      <select id="selectLang" class="lang-select">
-        <option value="vietnamese" selected>Tiếng Việt</option>
-        <option value="english">English</option>
-        <option value="auto">Tự động phát hiện</option>
-      </select>
-    </div>
-
-    <div class="pipeline-stats" id="pipelineStats" style="display: none;">
+      <div class="pipeline-stats" id="pipelineStats" style="display: none;">
         <div class="stat-row">
-          <span>AI Whisper:</span>
+          <span>AI Whisper (Tự nhận diện):</span>
           <strong id="statModel" style="color: #38bdf8;">Đang kết nối...</strong>
         </div>
         <div class="stat-row">
@@ -46,16 +37,8 @@
           <strong id="statVad" style="color: #94a3b8;">Chờ âm thanh...</strong>
         </div>
         <div class="stat-row">
-          <span>Chunks có tiếng:</span>
-          <strong id="statChunks">0</strong>
-        </div>
-        <div class="stat-row">
-          <span>Đã lọc im lặng:</span>
-          <strong id="statSilence">0 chunks</strong>
-        </div>
-        <div class="stat-row">
-          <span>Hàng đợi Queue:</span>
-          <strong id="statQueue">0/5</strong>
+          <span>Luồng xử lý (Queue):</span>
+          <strong id="statQueue">0/5 (0 chunks)</strong>
         </div>
       </div>
 
@@ -87,7 +70,7 @@
   </div>
 
   <div class="footer">
-    Local-first AI Subtitles
+    Local-first AI Subtitles • Tự động nhận diện ngôn ngữ
   </div>
 
   <script type="module" src="./popup.ts"></script>
