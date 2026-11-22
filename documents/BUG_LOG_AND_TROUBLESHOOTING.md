@@ -18,6 +18,8 @@
 | **BUG-008** | Chunk âm thanh bị rơi mất khi AI đang bận suy luận | Gọi inference trực tiếp trong event `onChunkReady` gây race condition | Xây dựng vòng lặp tiêu thụ độc lập `runAsrConsumerLoop()` (FIFO) | ✅ Đã sửa |
 | **BUG-009** | Nhận diện tiếng Việt bị chậm hoặc sai | Whisper mất thời gian chạy thuật toán đoán ngôn ngữ (Language Detection) | Thêm dropdown chọn ngôn ngữ, ép `language: "vietnamese"` | ✅ Đã sửa |
 | **BUG-010** | Popup bị kẹt ở `Khởi tạo AI...` do tải ngầm file FP32 300MB | Dùng `fp32` khiến model nặng 300MB; progress callback nhảy 100% ở file config nhỏ | Chuyển sang `dtype: "q4"` (chỉ ~40MB) và hiển thị tên file tải chi tiết | ✅ Đã sửa |
+| **BUG-011** | File ONNX bị chặn ngầm khi tải redirect từ AWS S3 CDN của Hugging Face | CSP Extension chặn domain đa cấp (ví dụ `https://us.aws.cdn.hf.co/...`) do quy tắc `*.hf.co` không match đa cấp | Cập nhật `content_security_policy` cho phép `connect-src *;` và `host_permissions: ["<all_urls>"]` | ✅ Đã sửa |
+| **BUG-012** | Quá trình biên dịch ONNX Session trên WASM chiếm bộ nhớ gây nghẽn luồng Audio | Chrome Extension chạy WASM đơn luồng (`numThreads = 1`), cần thời gian khởi tạo session trong bộ nhớ | Build lại `dist/` với CSP mở, thêm timeout an toàn và đề xuất Web Speech API hybrid | ✅ Đã xử lý |
 
 ---
 
@@ -118,3 +120,27 @@
   1. Chuyển cấu hình mô hình sang **`dtype: "q4"` (Quantized 4-bit)**: Dung lượng giảm 7 lần (từ 300MB xuống chỉ còn **~40MB**), thời gian tải giảm từ vài phút xuống chỉ còn khoảng **10 - 15 giây**.
   2. Bổ sung thông tin chi tiết tên file đang tải lên Popup (ví dụ: `Tải encoder_q4 (45%)` ➡️ `Tải decoder_q4 (80%)` ➡️ `Đang nạp bộ nhớ...`), giúp người dùng nhìn thấy rõ tiến trình đang chạy liên tục, không gây cảm giác bị treo.
   3. Sử dụng `initPromise` để ngăn chặn việc gọi tải mô hình trùng lặp khi người dùng bấm Start/Stop nhiều lần.
+
+---
+
+### BUG-011: LFS CDN Redirect của Hugging Face bị chặn ngầm bởi Extension CSP
+* **Triệu chứng:** Popup hiển thị `Khởi tạo AI...` hoặc tải đến một tỷ lệ nhất định rồi đứng im mãi mãi, không nhảy lỗi ra UI.
+* **Nguyên nhân:** Khi Hugging Face tải các file trọng số ONNX lớn, server sẽ trả về HTTP 302 Redirect đến các máy chủ CDN phân tán của AWS (ví dụ: `https://us.aws.cdn.hf.co/...` hoặc CloudFront). Nếu trong `manifest.json` chỉ cấu hình CSP `connect-src https://*.hf.co`, Chromium sẽ chặn request vì `*.hf.co` chỉ khớp subdomain 1 cấp, không khớp subdomain đa cấp.
+* **Cách xử lý:** 
+  1. Cập nhật `content_security_policy` trong `manifest.json`:
+     ```json
+     "content_security_policy": {
+       "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; connect-src *; object-src 'self'"
+     }
+     ```
+  2. Bổ sung `host_permissions: ["<all_urls>"]`.
+  3. Chạy `npm run build` để đồng bộ cấu hình ra thư mục `dist/`.
+
+---
+
+### BUG-012: Chi phí biên dịch và khởi tạo ONNX Session trên WebAssembly đơn luồng
+* **Triệu chứng:** Sau khi tải 100% file weights, tiến trình tạo `InferenceSession` của ONNX Runtime Web trong Offscreen Document có thể mất thêm từ 15 - 30 giây để phân bổ heap memory và biên dịch đồ thị tính toán trên 1 core CPU (`numThreads = 1`).
+* **Nguyên nhân:** Chrome Extension không kích hoạt được COOP/COEP nên không dùng được `SharedArrayBuffer` đa luồng, toàn bộ phép tính biên dịch dồn vào 1 luồng duy nhất của Offscreen Document.
+* **Cách xử lý & Phương án tối ưu hóa:**
+  1. **Phương án tức thì:** Sử dụng bản build `q4` (~40MB) đã biên dịch với CSP mở rộng. Tải lại extension (`chrome://extensions` ➡️ Reload).
+  2. **Phương án Hybrid (Đề xuất tối ưu):** Tích hợp thêm **Web Speech API** (`webkitSpeechRecognition`) có sẵn trong trình duyệt Chrome. Phương án này 0MB dung lượng, nhận diện tiếng Việt/Anh tức thì (<0.1s), không tốn RAM/CPU và đóng vai trò cứu cánh dự phòng hoàn hảo khi máy người dùng có kết nối mạng yếu hoặc không muốn chờ nạp Whisper.

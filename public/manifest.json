@@ -10,12 +10,10 @@
     "activeTab"
   ],
   "host_permissions": [
-    "https://huggingface.co/*",
-    "https://*.huggingface.co/*",
-    "https://*.hf.co/*"
+    "<all_urls>"
   ],
   "content_security_policy": {
-    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; connect-src *; object-src 'self'"
   },
   "action": {
     "default_popup": "src/popup/index.html",

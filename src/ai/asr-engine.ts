@@ -94,6 +94,7 @@ export class LocalAsrEngine {
         this.state = "ready";
         console.log("[ClearVoice AI] Whisper Q4 Model successfully initialized and ready!");
       } catch (wasmError) {
+        this.initPromise = null; // Allow retry on failure
         this.state = "error";
         this.lastError = wasmError instanceof Error ? wasmError.message : String(wasmError);
         console.error("[ClearVoice AI] Failed to load model on CPU/WASM:", wasmError);
