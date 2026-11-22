@@ -130,8 +130,11 @@ async function handleInitAudioCapture(streamId: string, sessionId: string): Prom
     // CRITICAL 4: Initialize or warm up Local AI ASR Engine (Whisper)
     if (!asrEngine) {
       asrEngine = new LocalAsrEngine();
+    }
+    if (!asrEngine.isReady() && asrEngine.getState() !== "loading") {
       asrEngine
         .initialize((progressInfo) => {
+          if (asrEngine?.getState() !== "loading") return;
           chrome.runtime.sendMessage<ExtensionMessage>({
             type: MessageType.MODEL_STATUS,
             status: "loading",
@@ -150,7 +153,7 @@ async function handleInitAudioCapture(streamId: string, sessionId: string): Prom
           chrome.runtime.sendMessage<ExtensionMessage>({
             type: MessageType.MODEL_STATUS,
             status: "error",
-            error: String(err),
+            error: err instanceof Error ? err.message : String(err),
           }).catch(() => {});
         });
     }

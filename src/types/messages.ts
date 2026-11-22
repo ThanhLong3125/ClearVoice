@@ -2,7 +2,7 @@ import type { TranscriptSegment } from "./audio";
 
 export type CaptureState = "idle" | "starting" | "capturing" | "stopping" | "error";
 
-export enum MessageType {
+export const enum MessageType {
   START_CAPTURE = "START_CAPTURE",
   STOP_CAPTURE = "STOP_CAPTURE",
   GET_STATUS = "GET_STATUS",

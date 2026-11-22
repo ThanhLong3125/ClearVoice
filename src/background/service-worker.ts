@@ -55,6 +55,9 @@ function setCaptureState(state: CaptureState, error?: string): void {
 async function startCapture(targetTabId: number): Promise<void> {
   try {
     setCaptureState("starting");
+    if (lastModelStatus.status === "error") {
+      lastModelStatus = { status: "idle" };
+    }
     activeTabId = targetTabId;
     activeSessionId = `session_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
@@ -135,6 +138,9 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendRe
       break;
 
     case MessageType.MODEL_STATUS:
+      if (lastModelStatus.status === "error" && message.status === "loading") {
+        break;
+      }
       lastModelStatus = {
         status: message.status,
         progress: message.progress,

@@ -1,4 +1,4 @@
-import { MessageType, type ExtensionMessage } from "../types/messages";
+import type { ExtensionMessage } from "../types/messages";
 import "./overlay.css";
 
 let overlayContainer: HTMLDivElement | null = null;
@@ -83,17 +83,22 @@ function displaySubtitle(text: string, status: "partial" | "final" | "uncertain"
   }
 }
 
-// Listen for messages from Background
-chrome.runtime.onMessage.addListener((message: ExtensionMessage) => {
-  if (message.type === MessageType.TRANSCRIPT_UPDATE) {
-    displaySubtitle(message.segment.text, message.segment.status);
-  } else if (message.type === MessageType.AUDIO_VOLUME) {
-    updateBadgeVolume(message.volume);
-  } else if (message.type === MessageType.STATUS_UPDATE) {
-    if (message.state === "idle" || message.state === "error") {
-      if (liveBadge) {
-        liveBadge.style.display = "none";
+// Prevent duplicate listeners if content script is injected both declaratively and programmatically
+const globalOverlayState = window as unknown as { __clearVoiceOverlayLoaded?: boolean };
+if (!globalOverlayState.__clearVoiceOverlayLoaded) {
+  globalOverlayState.__clearVoiceOverlayLoaded = true;
+
+  chrome.runtime.onMessage.addListener((message: ExtensionMessage) => {
+    if (message.type === "TRANSCRIPT_UPDATE") {
+      displaySubtitle(message.segment.text, message.segment.status);
+    } else if (message.type === "AUDIO_VOLUME") {
+      updateBadgeVolume(message.volume);
+    } else if (message.type === "STATUS_UPDATE") {
+      if (message.state === "idle" || message.state === "error") {
+        if (liveBadge) {
+          liveBadge.style.display = "none";
+        }
       }
     }
-  }
-});
+  });
+}

@@ -4,14 +4,18 @@ import type { AudioChunk, TranscriptSegment } from "../types/audio";
 // Configure browser-friendly environment
 env.allowLocalModels = false;
 env.useBrowserCache = true;
+env.useWasmCache = false;
 
-// Configure ONNX Runtime WASM to avoid SharedArrayBuffer issues in extensions
+// Configure ONNX Runtime WASM to avoid SharedArrayBuffer and MV3 external script CSP issues
 if (env.backends?.onnx?.wasm) {
   env.backends.onnx.wasm.numThreads = 1;
   env.backends.onnx.wasm.proxy = false;
   try {
     if (typeof chrome !== "undefined" && chrome.runtime?.getURL) {
-      env.backends.onnx.wasm.wasmPaths = chrome.runtime.getURL("wasm/") + "/";
+      env.backends.onnx.wasm.wasmPaths = {
+        mjs: chrome.runtime.getURL("wasm/ort-wasm-simd-threaded.asyncify.mjs"),
+        wasm: chrome.runtime.getURL("wasm/ort-wasm-simd-threaded.asyncify.wasm"),
+      };
     }
   } catch {
     // Ignore in non-extension environments (e.g. testing)
@@ -76,23 +80,25 @@ export class LocalAsrEngine {
 
     this.initPromise = (async () => {
       const progressCallback = (data: { status: string; progress?: number; file?: string }) => {
-        if (onProgress) {
-          const rawProgress = typeof data.progress === "number" ? Math.round(data.progress) : 0;
+        if (!onProgress || this.state !== "loading") {
+          return;
+        }
+        if (data.status === "progress" && typeof data.progress === "number" && data.file) {
           onProgress({
-            progress: rawProgress,
+            progress: Math.round(data.progress),
             file: data.file,
             status: data.status,
           });
         }
       };
 
-      console.log("[ClearVoice AI] Initializing whisper-tiny via CPU / WASM Q4 (lightweight ~40MB)...");
+      console.log("[ClearVoice AI] Initializing whisper-tiny via WASM Q4 (~96MB)...");
       try {
         this.transcriber = (await pipeline(
           "automatic-speech-recognition",
           "onnx-community/whisper-tiny",
           {
-            device: "cpu",
+            device: "wasm",
             dtype: "q4",
             progress_callback: progressCallback,
           }
@@ -105,7 +111,7 @@ export class LocalAsrEngine {
         this.initPromise = null; // Allow retry on failure
         this.state = "error";
         this.lastError = wasmError instanceof Error ? wasmError.message : String(wasmError);
-        console.error("[ClearVoice AI] Failed to load model on CPU/WASM:", wasmError);
+        console.error("[ClearVoice AI] Failed to load model on WASM:", wasmError);
         throw wasmError;
       }
     })();
@@ -133,10 +139,11 @@ export class LocalAsrEngine {
     try {
       const startTime = performance.now();
 
-      // Whisper parameters: pass language explicitly to avoid slow language detection
+      // Whisper parameters: pass language explicitly and cap tokens for 3s chunk to prevent repetition loops on music/noise
       const options: Record<string, unknown> = {
         task: "transcribe",
-        return_timestamps: true,
+        return_timestamps: false,
+        max_new_tokens: 64,
       };
       if (this.currentLanguage && this.currentLanguage !== "auto") {
         options.language = this.currentLanguage;
