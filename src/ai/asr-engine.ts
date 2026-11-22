@@ -9,6 +9,13 @@ env.useBrowserCache = true;
 if (env.backends?.onnx?.wasm) {
   env.backends.onnx.wasm.numThreads = 1;
   env.backends.onnx.wasm.proxy = false;
+  try {
+    if (typeof chrome !== "undefined" && chrome.runtime?.getURL) {
+      env.backends.onnx.wasm.wasmPaths = chrome.runtime.getURL("wasm/") + "/";
+    }
+  } catch {
+    // Ignore in non-extension environments (e.g. testing)
+  }
 }
 
 export type AsrState = "idle" | "loading" | "ready" | "inferring" | "error";
@@ -69,9 +76,10 @@ export class LocalAsrEngine {
 
     this.initPromise = (async () => {
       const progressCallback = (data: { status: string; progress?: number; file?: string }) => {
-        if (onProgress && typeof data.progress === "number") {
+        if (onProgress) {
+          const rawProgress = typeof data.progress === "number" ? Math.round(data.progress) : 0;
           onProgress({
-            progress: Math.round(data.progress),
+            progress: rawProgress,
             file: data.file,
             status: data.status,
           });

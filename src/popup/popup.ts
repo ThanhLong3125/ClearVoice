@@ -15,6 +15,8 @@ const statVad = document.getElementById("statVad") as HTMLElement;
 const statChunks = document.getElementById("statChunks") as HTMLElement;
 const statSilence = document.getElementById("statSilence") as HTMLElement;
 const statQueue = document.getElementById("statQueue") as HTMLElement;
+const subtitleCard = document.getElementById("subtitleCard") as HTMLDivElement;
+const popupSubtitle = document.getElementById("popupSubtitle") as HTMLDivElement;
 
 function updateUI(state: CaptureState, error?: string): void {
   statusDot.className = `status-dot ${state}`;
@@ -30,6 +32,7 @@ function updateUI(state: CaptureState, error?: string): void {
       btnStop.disabled = true;
       volumeContainer.style.display = "none";
       if (pipelineStats) pipelineStats.style.display = "none";
+      if (subtitleCard) subtitleCard.style.display = "none";
       updateVolume(0);
       resetStats();
       break;
@@ -39,6 +42,7 @@ function updateUI(state: CaptureState, error?: string): void {
       btnStop.disabled = true;
       volumeContainer.style.display = "block";
       if (pipelineStats) pipelineStats.style.display = "block";
+      if (subtitleCard) subtitleCard.style.display = "block";
       break;
     case "capturing":
       statusText.textContent = "Đang thu âm tab";
@@ -46,6 +50,7 @@ function updateUI(state: CaptureState, error?: string): void {
       btnStop.disabled = false;
       volumeContainer.style.display = "block";
       if (pipelineStats) pipelineStats.style.display = "block";
+      if (subtitleCard) subtitleCard.style.display = "block";
       break;
     case "stopping":
       statusText.textContent = "Đang dừng...";
@@ -53,6 +58,7 @@ function updateUI(state: CaptureState, error?: string): void {
       btnStop.disabled = true;
       volumeContainer.style.display = "none";
       if (pipelineStats) pipelineStats.style.display = "none";
+      if (subtitleCard) subtitleCard.style.display = "none";
       updateVolume(0);
       break;
     case "error":
@@ -61,6 +67,7 @@ function updateUI(state: CaptureState, error?: string): void {
       btnStop.disabled = true;
       volumeContainer.style.display = "none";
       if (pipelineStats) pipelineStats.style.display = "none";
+      if (subtitleCard) subtitleCard.style.display = "none";
       updateVolume(0);
       break;
   }
@@ -85,6 +92,7 @@ function resetStats(): void {
   if (statChunks) statChunks.textContent = "0";
   if (statSilence) statSilence.textContent = "0 chunks";
   if (statQueue) statQueue.textContent = "0/5";
+  if (popupSubtitle) popupSubtitle.textContent = "Đang lắng nghe...";
 }
 
 const selectLang = document.getElementById("selectLang") as HTMLSelectElement;
@@ -140,6 +148,9 @@ chrome.runtime.sendMessage<ExtensionMessage>({ type: MessageType.GET_STATUS }, (
     if (response.modelStatus) {
       updateModelUI(response.modelStatus);
     }
+    if (response.lastTranscript && popupSubtitle) {
+      popupSubtitle.textContent = response.lastTranscript;
+    }
   }
 });
 
@@ -151,6 +162,10 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage) => {
     updateVolume(message.volume);
   } else if (message.type === MessageType.MODEL_STATUS) {
     updateModelUI(message);
+  } else if (message.type === MessageType.TRANSCRIPT_UPDATE) {
+    if (popupSubtitle && message.segment?.text) {
+      popupSubtitle.textContent = message.segment.text;
+    }
   } else if (message.type === MessageType.PIPELINE_METRICS) {
     if (statVad) {
       if (message.isSpeechActive) {

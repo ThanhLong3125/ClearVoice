@@ -4,6 +4,7 @@ let currentState: CaptureState = "idle";
 let activeSessionId: string | null = null;
 let activeTabId: number | null = null;
 let lastErrorMsg: string | undefined = undefined;
+let lastTranscript: string | null = null;
 let lastModelStatus: {
   status: "idle" | "loading" | "ready" | "error";
   progress?: number;
@@ -80,6 +81,21 @@ async function startCapture(targetTabId: number): Promise<void> {
       sessionId: activeSessionId,
     });
 
+    // 4. Ensure Content Script & CSS are injected into the captured tab
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: targetTabId },
+        files: ["content.js"],
+      });
+      await chrome.scripting.insertCSS({
+        target: { tabId: targetTabId },
+        files: ["content.css"],
+      });
+      console.log(`[ClearVoice SW] Verified content script injection in tab ${targetTabId}`);
+    } catch {
+      // Ignore if already injected or on internal/restricted browser page
+    }
+
     setCaptureState("capturing");
     console.log(`[ClearVoice SW] Started capture for tab ${targetTabId}, session: ${activeSessionId}`);
   } catch (err: unknown) {
@@ -115,7 +131,7 @@ async function stopCapture(): Promise<void> {
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
   switch (message.type) {
     case MessageType.GET_STATUS:
-      sendResponse({ state: currentState, error: lastErrorMsg, modelStatus: lastModelStatus });
+      sendResponse({ state: currentState, error: lastErrorMsg, modelStatus: lastModelStatus, lastTranscript });
       break;
 
     case MessageType.MODEL_STATUS:
@@ -150,6 +166,7 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendRe
       break;
 
     case MessageType.TRANSCRIPT_UPDATE:
+      lastTranscript = message.segment?.text ?? null;
       // Broadcast transcript to active tab's content script
       if (activeTabId) {
         chrome.tabs.sendMessage(activeTabId, message).catch(() => {});

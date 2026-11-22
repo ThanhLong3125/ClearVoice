@@ -20,6 +20,7 @@
 | **BUG-010** | Popup bị kẹt ở `Khởi tạo AI...` do tải ngầm file FP32 300MB | Dùng `fp32` khiến model nặng 300MB; progress callback nhảy 100% ở file config nhỏ | Chuyển sang `dtype: "q4"` (chỉ ~40MB) và hiển thị tên file tải chi tiết | ✅ Đã sửa |
 | **BUG-011** | File ONNX bị chặn ngầm khi tải redirect từ AWS S3 CDN của Hugging Face | CSP Extension chặn domain đa cấp (ví dụ `https://us.aws.cdn.hf.co/...`) do quy tắc `*.hf.co` không match đa cấp | Cập nhật `content_security_policy` cho phép `connect-src *;` và `host_permissions: ["<all_urls>"]` | ✅ Đã sửa |
 | **BUG-012** | Quá trình biên dịch ONNX Session trên WASM chiếm bộ nhớ gây nghẽn luồng Audio | Chrome Extension chạy WASM đơn luồng (`numThreads = 1`), cần thời gian khởi tạo session trong bộ nhớ | Build lại `dist/` với CSP mở, thêm timeout an toàn và đề xuất Web Speech API hybrid | ✅ Đã xử lý |
+| **BUG-013** | Không thấy phụ đề trên video khi mở lại tab hoặc chưa F5 tab | Content Script không tự động inject vào các tab đã mở trước đó; thiếu xem trước phụ đề trong Popup | Bổ sung quyền `scripting`, tự động inject `content.js` khi start và tích hợp khung Live Subtitle ngay trong Popup | ✅ Đã sửa |
 
 ---
 
@@ -144,3 +145,15 @@
 * **Cách xử lý & Phương án tối ưu hóa:**
   1. **Phương án tức thì:** Sử dụng bản build `q4` (~40MB) đã biên dịch với CSP mở rộng. Tải lại extension (`chrome://extensions` ➡️ Reload).
   2. **Phương án Hybrid (Đề xuất tối ưu):** Tích hợp thêm **Web Speech API** (`webkitSpeechRecognition`) có sẵn trong trình duyệt Chrome. Phương án này 0MB dung lượng, nhận diện tiếng Việt/Anh tức thì (<0.1s), không tốn RAM/CPU và đóng vai trò cứu cánh dự phòng hoàn hảo khi máy người dùng có kết nối mạng yếu hoặc không muốn chờ nạp Whisper.
+
+---
+
+### BUG-013: Mất liên kết Content Script trên tab mở sẵn & Thiếu hiển thị phụ đề trực tiếp trong Popup
+* **Triệu chứng:** Người dùng bấm Bắt đầu thu âm nhưng không thấy khung phụ đề ClearVoice hay biểu tượng badge trên trang web (chỉ thấy phụ đề gốc của YouTube).
+* **Nguyên nhân:**
+  1. Trong kiến trúc Chrome Extension, khi tiện ích được tải lại (Reload), các tab trình duyệt đã mở từ trước đó sẽ **mất liên kết** với Content Script cũ và Chrome **không tự động tái tiêm (inject)** `content.js` vào nếu người dùng không nhấn F5 tải lại tab đó.
+  2. Toàn bộ phụ đề chỉ được gửi vào Content Script của trang web, giao diện Popup không có khung xem trước kết quả trực tiếp, khiến người dùng không biết AI đã sinh ra chữ hay chưa.
+* **Cách xử lý:**
+  1. Thêm quyền `"scripting"` vào `manifest.json`.
+  2. Trong `service-worker.ts`: Khi `startCapture(tabId)` được gọi, tự động thực thi `chrome.scripting.executeScript` và `chrome.scripting.insertCSS` để đưa ngay `content.js` và `content.css` vào tab đó mà người dùng **không cần phải F5 trang web**.
+  3. Bổ sung một khung **Phụ đề trực tiếp (Live ASR)** ngay trong Popup UI, giúp người dùng quan sát phụ đề tức thì tại cả 2 nơi (trên trang web và ngay trong cửa sổ Popup).
