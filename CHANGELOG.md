@@ -9,6 +9,9 @@ Tất cả các thay đổi đáng chú ý của dự án **ClearVoice** sẽ đ
 ## [Unreleased]
 *Các thay đổi đang phát triển và chưa đóng gói thành phiên bản mới sẽ nằm ở đây.*
 
+---
+
+## [0.2.0] - 2026-11-23
 ### Added
 - **Web Worker ASR Engine (`src/offscreen/asr-worker.ts`):** Tách toàn bộ quá trình tải mô hình, biên dịch WASM và suy luận Whisper sang luồng Web Worker riêng biệt, giải phóng 100% luồng giao diện chính (Main UI Thread) của Extension.
 - **Tự động nhận diện đa ngôn ngữ 1 bước (`WhisperAutoLangLogitsProcessor`):** Can thiệp trực tiếp vào logits bước giải mã đầu tiên của Whisper để tự động nhận diện ngôn ngữ (`vi`, `en`, `zh`, `ja`, `ko`, `fr`, `de`, `es`, `ru`) trên từng đoạn âm thanh mà không cần người dùng chọn thủ công.
