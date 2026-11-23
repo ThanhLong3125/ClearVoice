@@ -4,6 +4,10 @@ node_modules/
 # Production build output
 dist/
 
+# Downloaded AI Models (packaged during build/dev)
+public/models/
+dist/models/
+
 # Logs
 npm-debug.log*
 yarn-debug.log*
