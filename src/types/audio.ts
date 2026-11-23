@@ -10,6 +10,8 @@ export interface AudioChunk {
   format: "f32";                 // Float32 PCM format
   samples: Float32Array;         // Raw audio buffer [-1.0, 1.0]
   capturedAtMonotonicMs: number; // Monotonic timestamp (performance.now())
+  isCongested?: boolean;         // True if queue was under backpressure when dequeued
+  maxNewTokens?: number;         // Suggested token generation budget (e.g. 24 if congested, 40 normal)
 }
 
 /**

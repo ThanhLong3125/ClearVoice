@@ -4,7 +4,7 @@ import type { AudioChunk, TranscriptSegment } from "../types/audio";
 export type WorkerInMessage =
   | { type: "INIT"; language?: string }
   | { type: "SET_LANGUAGE"; language: string }
-  | { type: "TRANSCRIBE"; requestId: number; chunk: AudioChunk };
+  | { type: "TRANSCRIBE"; requestId: number; chunk: AudioChunk; maxNewTokens?: number };
 
 export type WorkerOutMessage =
   | { type: "PROGRESS"; progress: AsrProgress }
@@ -48,13 +48,17 @@ self.onmessage = async (event: MessageEvent<WorkerInMessage>) => {
     }
   } else if (msg.type === "TRANSCRIBE") {
     try {
-      const segment = await engine.transcribe(msg.chunk, (partialSegment) => {
-        self.postMessage({
-          type: "PARTIAL",
-          requestId: msg.requestId,
-          segment: partialSegment,
-        } satisfies WorkerOutMessage);
-      });
+      const segment = await engine.transcribe(
+        msg.chunk,
+        (partialSegment) => {
+          self.postMessage({
+            type: "PARTIAL",
+            requestId: msg.requestId,
+            segment: partialSegment,
+          } satisfies WorkerOutMessage);
+        },
+        msg.maxNewTokens
+      );
       self.postMessage({
         type: "RESULT",
         requestId: msg.requestId,

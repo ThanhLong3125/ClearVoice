@@ -285,6 +285,8 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
     case MessageType.SET_LANGUAGE:
       selectedLanguage = message.language;
       persistSessionState();
+      // Forward directly to offscreen document and any listening extension contexts
+      chrome.runtime.sendMessage(message).catch(() => {});
       return false;
 
     case MessageType.START_CAPTURE:

@@ -98,7 +98,7 @@ function displaySubtitle(sessionId: string, text: string, status: "partial" | "f
       if (overlayContainer) {
         overlayContainer.style.display = "none";
       }
-    }, 6000);
+    }, 8000);
   }
 }
 

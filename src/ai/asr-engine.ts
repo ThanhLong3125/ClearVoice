@@ -3,7 +3,6 @@ import {
   env,
   LogitsProcessor,
   LogitsProcessorList,
-  WhisperTextStreamer,
   type AutomaticSpeechRecognitionPipeline,
 } from "@huggingface/transformers";
 import type { AudioChunk, TranscriptSegment } from "../types/audio";
@@ -176,16 +175,28 @@ class WhisperAutoLangLogitsProcessor extends LogitsProcessor {
   }
 }
 
+// Collapses single repeated characters (e.g. 紹紹紹紹... -> 紹 or ..... -> .)
+const CHAR_REPEAT_REGEX = /(.)\1{2,}/gu;
+// Foreign CJK script hallucinations when target language is Latin/Vietnamese
+const CJK_HALLUCINATION_REGEX = /[\u4e00-\u9fa5\u3040-\u30ff\uac00-\ud7af]/gu;
+
 /**
  * Filters out common Whisper non-speech hallucinations and collapses Unicode repetitive phrase loops.
  */
-export function cleanHallucinatedText(raw: string): string {
+export function cleanHallucinatedText(raw: string, targetLanguage?: string): string {
   if (!raw) return "";
   // Remove bracketed/parenthesized noise tags such as [Music], (nhạc), [Applause]
   let cleaned = raw.replace(/\[[^\]]*\]|\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
   if (!cleaned || /^[\p{P}\p{S}\s]+$/u.test(cleaned)) {
     return "";
   }
+  // If target language is English or Vietnamese, eliminate Asian CJK/Hangul script hallucinations
+  if (targetLanguage === "en" || targetLanguage === "vi") {
+    cleaned = cleaned.replace(CJK_HALLUCINATION_REGEX, " ").replace(/\s+/g, " ").trim();
+    if (!cleaned) return "";
+  }
+  // Collapse consecutive 3+ repetitions of single characters (e.g. 紹紹紹... -> 紹, yyyyy -> y)
+  cleaned = cleaned.replace(CHAR_REPEAT_REGEX, "$1");
   // Collapse consecutive 3+ repetitions of the same word/phrase (Unicode-aware for Vietnamese diacritics)
   cleaned = cleaned.replace(REPETITION_REGEX, "$1");
   return cleaned.trim();
@@ -224,7 +235,16 @@ export class LocalAsrEngine {
   private candidateAutoLangStreak: number = 0;
 
   public setLanguage(language: string): void {
-    const normalized = (language || "auto").trim().toLowerCase();
+    let normalized = (language || "auto").trim().toLowerCase();
+    if (normalized === "english") normalized = "en";
+    if (normalized === "vietnamese") normalized = "vi";
+    if (normalized === "japanese") normalized = "ja";
+    if (normalized === "korean") normalized = "ko";
+    if (normalized === "chinese") normalized = "zh";
+    if (normalized === "french") normalized = "fr";
+    if (normalized === "german") normalized = "de";
+    if (normalized === "spanish") normalized = "es";
+
     if (this.selectedLanguage !== normalized) {
       this.selectedLanguage = normalized;
       this.lockedAutoLangId = null;
@@ -418,7 +438,8 @@ export class LocalAsrEngine {
    */
   public async transcribe(
     chunk: AudioChunk,
-    onPartial?: (segment: TranscriptSegment) => void
+    _onPartial?: (segment: TranscriptSegment) => void,
+    maxNewTokens?: number
   ): Promise<TranscriptSegment | null> {
     if (!this.transcriber || !this.isReady()) {
       console.warn("[ClearVoice AI] Transcribe called before model is ready.");
@@ -438,55 +459,23 @@ export class LocalAsrEngine {
       const endMs = Math.round(((chunk.startSample + chunk.samples.length) / chunk.sampleRate) * 1000);
       const segId = `seg_${chunk.sessionId}_${chunk.sequence}`;
 
+      const tokensBudget = maxNewTokens ?? chunk.maxNewTokens ?? 64;
       const options: Record<string, unknown> = {
         return_timestamps: false,
-        max_new_tokens: 40,
+        max_new_tokens: tokensBudget,
       };
 
-      if (this.autoLangProcessorList) {
+      if (this.selectedLanguage && this.selectedLanguage !== "auto") {
+        options.language = this.selectedLanguage;
+        options.task = "transcribe";
+      } else if (this.autoLangProcessorList) {
         options.decoder_input_ids = [this.decoderStartTokenId];
         options.logits_processor = this.autoLangProcessorList;
       } else {
         options.task = "transcribe";
       }
 
-      // Attach WhisperTextStreamer to emit partial words immediately as each token is decoded (~40-60ms/token)
-      const tokenizer = (this.transcriber as unknown as { tokenizer?: unknown }).tokenizer;
-      let streamedRaw = "";
-      let lastPartialText = "";
-
-      if (onPartial && tokenizer) {
-        try {
-          const streamer = new WhisperTextStreamer(
-            tokenizer as ConstructorParameters<typeof WhisperTextStreamer>[0],
-            {
-              skip_prompt: true,
-              skip_special_tokens: true,
-              callback_function: (piece: string) => {
-                streamedRaw += piece;
-                const partialClean = cleanHallucinatedText(streamedRaw);
-                if (partialClean && partialClean !== lastPartialText) {
-                  lastPartialText = partialClean;
-                  onPartial({
-                    id: segId,
-                    sessionId: chunk.sessionId,
-                    startMs,
-                    endMs,
-                    text: partialClean,
-                    status: "partial",
-                    sourceSequenceStart: chunk.sequence,
-                    sourceSequenceEnd: chunk.sequence,
-                  });
-                }
-              },
-            }
-          );
-          options.streamer = streamer;
-        } catch {
-          // Fallback to batch mode if streamer construction fails
-        }
-      }
-
+      // Sequential Clause Mode: Dispatches full, coherent sentence phrases to UI
       const output = (await this.transcriber(chunk.samples, options)) as
         | { text: string }
         | Array<{ text: string }>;
@@ -500,7 +489,7 @@ export class LocalAsrEngine {
         text = output.text.trim();
       }
 
-      text = cleanHallucinatedText(text);
+      text = cleanHallucinatedText(text, this.selectedLanguage);
 
       this.state = "ready";
       this.isProcessing = false;

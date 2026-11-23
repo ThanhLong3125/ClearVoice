@@ -6,6 +6,34 @@ Tất cả các thay đổi đáng chú ý của dự án **ClearVoice** sẽ đ
 
 ---
 
+## [0.5.0] - 2026-11-23
+### Added
+- **Kiến trúc Nhận dạng Tuần tự theo Mệnh đề (Sequential Clause Captioning Architecture):**
+  - Chuyển đổi mô hình hiển thị phụ đề từ streaming từng từ vụn vặt sang xử lý và hiển thị tuần tự theo mệnh đề/câu hoàn chỉnh (Clause-based).
+  - Phụ đề xuất hiện nguyên vẹn một câu (8–15 từ) đúng ngữ pháp thay vì nhấp nháy 1–2 từ rồi biến mất, đạt chuẩn trải nghiệm hội họp như Google Meet / Microsoft Teams.
+- **Bộ lọc Âm thông dải Giọng nói Biquad 4th-order (VoiceBandpassFilter 260Hz – 3400Hz):**
+  - Tách riêng dải tần số thanh quản người, suy hao ~20 lần tiếng trống kick, bass siêu trầm (< 250Hz) và tiếng hi-hat/synth cao tần (> 3500Hz) trong nhạc nền.
+  - VAD và Chunker nhận biết chính xác khoảng dừng câu của người nói/hát mà không bị nhạc nền làm mất khoảng lặng.
+- **Cơ chế Stride Overlap (~0.3s) khi cắt câu cưỡng bức (Forced Cut):**
+  - Khi câu nói/hát dài chạm ngưỡng tối đa (4.0s) mà không có khoảng lặng tự nhiên, Chunker tìm đáy năng lượng âm tiết và giữ lại ~300ms nối sang chunk sau, triệt tiêu hoàn toàn lỗi chém đứt đôi từ ngữ.
+- **Hàng đợi Không mất âm thanh (Zero-Drop Queue with Dynamic Token Budget):**
+  - Mở rộng trần gộp câu lên 7.0 giây và dung lượng hàng đợi lên 8 chunks, triệt tiêu tình trạng vứt bỏ (drop) audio khi AI đang bận suy luận.
+  - Tự động điều tiết ngân sách sinh (`max_new_tokens`: 64 khi rảnh, 32 khi có dồn ứ hàng đợi), giúp AI giải phóng áp lực hàng đợi nhanh gấp đôi mà không suy giảm chất lượng câu.
+
+### Fixed
+- **Sửa Lỗi Đồng bộ Ngôn ngữ & Khóa cứng Token (Language Pinning):**
+  - Sửa lỗi Service Worker không chuyển tiếp sự kiện `SET_LANGUAGE` sang Offscreen Document theo thời gian thực.
+  - Bổ sung hàm chuẩn hóa tên ngôn ngữ (`english` → `en`, `vietnamese` → `vi`), ngăn chặn lỗi token `undefined` khiến Whisper rơi ngược về Auto-detect.
+  - Khóa cứng cấu hình `options.language` và `options.task = "transcribe"` ở tầng mô hình, loại bỏ nguy cơ Whisper tự động nhảy sang tiếng Hàn/Trung trên video tiếng Anh.
+- **Triệt tiêu Ảo giác CJK & Vòng lặp Ký tự vô tận (CJK & Character Repeat Filter):**
+  - Bổ sung bộ lọc regex quét sạch các chuỗi ký tự đơn lặp vô tận không dấu cách (`(.)\1{2,}` như `紹紹紹...`).
+  - Tự động thanh lọc mọi ký tự tiếng Trung, Hàn, Nhật phát sinh do ảo giác của Whisper khi chế độ ngôn ngữ đang là Tiếng Anh hoặc Tiếng Việt.
+- **Tối ưu Giao diện Phụ đề Cuộn 2 Dòng (Rolling 2-Line UX):**
+  - Cải tiến giao diện phụ đề Closed Shadow DOM: Dòng 1 lưu giữ câu trước (màu xám dịu), Dòng 2 hiển thị trọn vẹn câu hiện tại với phông chữ lớn, sắc nét.
+  - Tăng thời gian lưu phụ đề lên 8.0 giây, đảm bảo người tham gia cuộc họp kịp đọc hiểu tự nhiên mà không bị mất chữ.
+
+---
+
 ## [0.4.0] - 2026-11-23
 ### Added
 - **Đóng gói Sẵn Mô hình AI 100% Offline (Local Model Packaging):**

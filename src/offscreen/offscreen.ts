@@ -148,6 +148,7 @@ function transcribeInWorker(chunk: AudioChunk): Promise<TranscriptSegment | null
       type: "TRANSCRIBE",
       requestId,
       chunk,
+      maxNewTokens: chunk.maxNewTokens,
     } satisfies WorkerInMessage);
   });
 }
@@ -260,10 +261,11 @@ async function handleInitAudioCapture(streamId: string, sessionId: string, langu
     pipeline = new AudioPipeline(sessionId, {
       sourceSampleRate: audioContext.sampleRate,
       targetSampleRate: 16000,
-      windowDurationSec: 3.0,
-      minChunkDurationSec: 1.4,
-      pauseDurationMs: 280,
-      maxQueueCapacity: 4,
+      windowDurationSec: 4.0,
+      minChunkDurationSec: 2.4,
+      pauseDurationMs: 360,
+      maxQueueCapacity: 8,
+      forcedOverlapDurationSec: 0.3,
       onChunkReady: (chunk) => {
         console.log(
           `[ClearVoice Pipeline] Phrase Chunk #${chunk.sequence} | Duration: ${(chunk.samples.length / 16000).toFixed(2)}s | Timeline: ${(chunk.startSample / 16000).toFixed(2)}s`

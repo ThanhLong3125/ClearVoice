@@ -6,8 +6,8 @@
   transform: translateX(-50%);
   z-index: 2147483647; /* Maximum z-index to stay on top of video players */
   pointer-events: none;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  max-width: 80%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  max-width: 85%;
   text-align: center;
   transition: opacity 0.3s ease;
 }
@@ -15,34 +15,36 @@
 .clearvoice-subtitle-box {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  background: rgba(15, 23, 42, 0.88);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  padding: 8px 18px;
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  max-width: 800px;
+  gap: 6px;
+  background: rgba(15, 23, 42, 0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  padding: 10px 24px;
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  max-width: 880px;
   margin: 0 auto;
 }
 
 .clearvoice-line {
-  line-height: 1.4;
+  line-height: 1.45;
   word-break: break-word;
+  transition: all 0.2s ease-in-out;
 }
 
 .clearvoice-line.prev {
-  font-size: 1.0rem;
+  font-size: 1.05rem;
   color: #94a3b8;
-  opacity: 0.82;
+  opacity: 0.85;
   font-weight: 400;
 }
 
 .clearvoice-line.curr {
-  font-size: 1.25rem;
+  font-size: 1.3rem;
   font-weight: 600;
   color: #ffffff;
+  letter-spacing: 0.01em;
 }
 
 .clearvoice-line.curr.partial {
