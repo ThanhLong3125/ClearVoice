@@ -21,6 +21,7 @@
 | **BUG-011** | Giao diện Popup che mất lỗi khởi tạo AI, kẹt mãi ở dòng `Tải ... (0%)` | `pipeline()` tải nhiều file song song (`Promise.all`); khi model ném lỗi, các file config vẫn bắn sự kiện `loading` ghi đè trạng thái `error` | Chặn mọi sự kiện progress khi `state !== "loading"` và cho phép retry khi khởi tạo thất bại | ✅ Đã sửa |
 | **BUG-012** | Giao diện Popup bị khựng/đơ khi bấm vào icon Extension lúc AI đang chạy & chọn Tiếng Anh vẫn dịch ra Tiếng Việt | `offscreen.html` và `popup/index.html` dùng chung Main UI Thread của Extension Process; `modeling_whisper.js` chưa cài đặt auto language detection | Tách toàn bộ Whisper WASM sang Web Worker (`asr-worker.ts`) và viết `WhisperAutoLangLogitsProcessor` tự nhận diện đa ngôn ngữ 1 bước | ✅ Đã sửa |
 | **BUG-013** | Phụ đề bị trễ 2–3 câu so với video, turn đầu bịa chữ ở cuối câu rồi turn sau mới chuẩn | Cửa sổ trượt cố định (`window 3s, hop 1s`) cắt đứt ngang âm tiết và chồng lấp 2s (bắt AI dịch lặp 3 lần) kết hợp hàng đợi FIFO `5/5` | Thay bằng `Dynamic VAD-Pause & Minimum-Energy Valley Chunker` (0% chồng lấp, cắt tại điểm ngắt hơi/năng lượng cực tiểu) và hàng đợi `Coalesce & Drop-Stale` | ✅ Đã sửa |
+| **BUG-014** | Tiện ích không nhận được âm thanh (`AbortError: Error starting tab capture` hoặc Volume Meter = 0%) | COEP `require-corp` trong `manifest.json` chặn quyền nạp luồng media từ tab khác vào Extension; AudioContext trong offscreen document bị rơi vào trạng thái `"suspended"` khi khởi tạo bất đồng bộ | Gỡ bỏ COOP/COEP khỏi `manifest.json` và bổ sung `audioContext.resume()` ngay sau khi khởi tạo cùng vòng lặp bảo vệ trong `volumeInterval` | ✅ Đã sửa |
 
 ---
 
@@ -94,4 +95,15 @@
   2. **Cơ chế Hàng đợi `Coalesce & Drop-Stale` (`src/audio/pipeline.ts` & `src/audio/queue.ts`):**
      - Khi AI Worker vừa rảnh, nếu có 2 cụm từ ngắn đang chờ mà tổng thời lượng `<= 3.5s`, hệ thống tự động nối (`coalesce`) chúng thành 1 lần dịch duy nhất để không mất chữ mà vẫn bắt kịp thời gian thực.
      - Nếu tổng âm thanh chờ vượt quá `3.5s`, tự động xả bỏ (`drop-stale`) các chunk cũ quá hạn để phụ đề luôn bám sát câu đang nói hiện tại.
+
+---
+
+### 6. BUG-014: Luồng thu âm tab bị chặn bởi COEP (`require-corp`) và AudioContext bị treo (`suspended`)
+* **Triệu chứng:** Người dùng bấm "Bắt đầu thu âm", nhưng thanh âm lượng hiển thị `0%`, không có âm thanh nào truyền đến bộ tách từ hay AI, và console xuất hiện lỗi `DOMException: AbortError: Error starting tab capture`.
+* **Nguyên nhân gốc rễ:**
+  1. Trong kiến trúc bảo mật Chromium Manifest V3, khi khai báo `cross_origin_embedder_policy: "require-corp"` trong `manifest.json` (nhằm kích hoạt `SharedArrayBuffer` cho WASM đa luồng), mọi tài nguyên nhúng chéo nguồn (cross-origin resources) đều bắt buộc phải có header `Cross-Origin-Resource-Policy: cross-origin`. Do luồng âm thanh tab (`chrome.tabCapture` / `getUserMedia`) bắt nguồn từ trang web bên ngoài (YouTube, podcast, v.v.) không mang header CORP này, Chromium chủ động từ chối cấp luồng media với mã ngoại lệ `AbortError: Error starting tab capture`.
+  2. Ngoài ra, trong môi trường Offscreen Document, `new AudioContext()` được tạo bên trong trình lắng nghe tin nhắn (không gắn trực tiếp với thao tác click người dùng trên trang HTML đó), khiến cơ chế autoplay của trình duyệt đưa `AudioContext` về trạng thái `"suspended"`. Khi ở trạng thái `"suspended"`, AudioNode không xử lý buffer PCM, dẫn tới RMS = 0 (0% volume).
+* **Cách xử lý:**
+  1. **Gỡ bỏ hoàn toàn `cross_origin_opener_policy` và `cross_origin_embedder_policy` khỏi `manifest.json`:** ONNX Runtime Web hoạt động hoàn toàn ổn định và tốc độ cao ở chế độ đơn luồng tăng tốc SIMD (`numThreads = 1`, `device: "wasm"`), giải mã các chunk câu 1–2s trong ~350–500ms mà không hề gây xung đột với API `tabCapture`.
+  2. **Bảo đảm trạng thái `AudioContext` luôn là `running`:** Ngay sau khi khởi tạo `audioContext = new AudioContext()`, kiểm tra `if (audioContext.state === "suspended") await audioContext.resume();`. Đồng thời trong hàm định kỳ `volumeInterval`, tự động đánh thức nếu context bị tạm dừng.
 

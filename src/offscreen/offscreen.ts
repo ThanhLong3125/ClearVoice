@@ -175,6 +175,10 @@ async function handleInitAudioCapture(streamId: string, sessionId: string): Prom
     });
 
     audioContext = new AudioContext();
+    if (audioContext.state === "suspended") {
+      console.log("[ClearVoice Offscreen] AudioContext suspended, resuming...");
+      await audioContext.resume();
+    }
     const sourceNode = audioContext.createMediaStreamSource(stream);
 
     // 1. Passthrough so user hears tab audio normally
@@ -187,8 +191,15 @@ async function handleInitAudioCapture(streamId: string, sessionId: string): Prom
 
     const buffer = new Float32Array(analyserNode.fftSize);
 
-    volumeInterval = window.setInterval(() => {
-      if (!analyserNode) return;
+    volumeInterval = window.setInterval(async () => {
+      if (!analyserNode || !audioContext) return;
+      if (audioContext.state === "suspended") {
+        try {
+          await audioContext.resume();
+        } catch {
+          // Ignore resume error
+        }
+      }
       analyserNode.getFloatTimeDomainData(buffer);
 
       let sum = 0;

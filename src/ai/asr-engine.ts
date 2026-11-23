@@ -37,21 +37,16 @@ function resolveExtensionWasmPaths(): { mjs: string; wasm: string } | undefined 
   return undefined;
 }
 
-// Configure ONNX Runtime WASM with multi-threading (SharedArrayBuffer via MV3 COOP/COEP)
+// Configure ONNX Runtime WASM with single-thread SIMD execution
 if (env.backends?.onnx?.wasm) {
-  const isIsolated = typeof self !== "undefined" && self.crossOriginIsolated === true;
-  const hwThreads =
-    typeof navigator !== "undefined" && navigator.hardwareConcurrency
-      ? navigator.hardwareConcurrency
-      : 4;
-  env.backends.onnx.wasm.numThreads = isIsolated ? Math.min(4, Math.max(2, Math.floor(hwThreads / 2))) : 1;
+  env.backends.onnx.wasm.numThreads = 1;
   env.backends.onnx.wasm.proxy = false;
   const paths = resolveExtensionWasmPaths();
   if (paths) {
     env.backends.onnx.wasm.wasmPaths = paths;
   }
   console.log(
-    `[ClearVoice AI] WASM Config | crossOriginIsolated=${isIsolated} | numThreads=${env.backends.onnx.wasm.numThreads} (hw=${hwThreads})`
+    `[ClearVoice AI] WASM Config | Single-thread SIMD | numThreads=1`
   );
 }
 
@@ -148,8 +143,7 @@ export class LocalAsrEngine {
   }
 
   public getDevice(): string {
-    const threads = env.backends?.onnx?.wasm?.numThreads ?? 1;
-    return threads > 1 ? `${this.activeDevice} x${threads}` : this.activeDevice;
+    return this.activeDevice;
   }
 
   public getLastError(): string | null {

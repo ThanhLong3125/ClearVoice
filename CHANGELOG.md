@@ -7,7 +7,12 @@ Tất cả các thay đổi đáng chú ý của dự án **ClearVoice** sẽ đ
 ---
 
 ## [Unreleased]
-*Các thay đổi đang phát triển và chưa đóng gói thành phiên bản mới sẽ nằm ở đây.*
+### Fixed
+- **Khắc phục dứt điểm lỗi không nhận âm thanh (`AbortError: Error starting tab capture` & AudioContext suspended):**
+  - Gỡ bỏ hoàn toàn cấu hình COOP/COEP (`cross_origin_embedder_policy: "require-corp"`) khỏi `manifest.json`. Trong Chromium MV3, chính sách `require-corp` xung đột trực tiếp với `chrome.tabCapture` / `getUserMedia` do luồng media của tab bên ngoài không chứa header CORP chéo nguồn.
+  - Chuyển backend ONNX Runtime WASM sang chế độ an toàn đơn luồng tăng tốc SIMD (`numThreads = 1`), đảm bảo khả năng tương thích 100% với môi trường Extension.
+  - Bổ sung cơ chế `await audioContext.resume()` ngay sau khi khởi tạo `AudioContext` trong Offscreen Document và vòng lặp tự động phục hồi trong `volumeInterval`, ngăn chặn hiện tượng AudioContext bị đưa vào trạng thái `"suspended"` (gây 0% volume).
+  - Tối ưu hóa giải phóng tài nguyên luồng âm thanh cũ trước khi cấp phát phiên mới để loại bỏ nguy cơ deadlock.
 
 ---
 
