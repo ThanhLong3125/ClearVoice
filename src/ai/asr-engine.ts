@@ -148,7 +148,8 @@ export class LocalAsrEngine {
   }
 
   public getDevice(): string {
-    return this.activeDevice;
+    const threads = env.backends?.onnx?.wasm?.numThreads ?? 1;
+    return threads > 1 ? `${this.activeDevice} x${threads}` : this.activeDevice;
   }
 
   public getLastError(): string | null {
