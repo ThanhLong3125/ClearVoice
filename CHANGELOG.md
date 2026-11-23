@@ -6,6 +6,37 @@ Tất cả các thay đổi đáng chú ý của dự án **ClearVoice** sẽ đ
 
 ---
 
+## [0.4.0] - 2026-11-23
+### Added
+- **Đóng gói Sẵn Mô hình AI 100% Offline (Local Model Packaging):**
+  - Đóng gói trực tiếp model `whisper-tiny` Q4 (~94MB) vào extension bundle thông qua `scripts/fetch-model.mjs`.
+  - Thiết lập `env.allowLocalModels = true`, `env.allowRemoteModels = false` và `local_files_only = true`. Giờ đây extension hoàn toàn không kết nối ra Hugging Face hay internet, bảo mật tuyệt đối.
+  - Tối ưu Content Security Policy (CSP): Siết `connect-src 'self'`, loại bỏ hoàn toàn các domain đám mây bên ngoài.
+- **Khởi động Nhanh & Pre-warm khi mở Popup:**
+  - Bổ sung lệnh `PREWARM_MODEL` kích hoạt tải model vào RAM/GPU ngay khi người dùng bấm mở icon Extension popup, giúp phụ đề sẵn sàng tức thì khi bắt đầu thu âm.
+- **Bộ lọc Âm thanh FIR Chống Aliasing & VAD Thích nghi:**
+  - Trang bị bộ lọc thông thấp Windowed-Sinc (Blackman FIR, 31 taps) giữ liên tục pha và mẫu biên khi hạ tần số 48kHz → 16kHz, loại bỏ hoàn toàn nhiễu gập tần số cao.
+  - Thuật toán VAD tự động bám đuổi năng lượng nền (`noiseFloorRms`), tương thích tốt với video có nhạc nền hoặc âm lượng nhỏ.
+  - AudioWorklet gom khối 2048 mẫu mono (~42ms) trước khi gửi qua port, giảm 16 lần tần suất IPC.
+- **Hỗ trợ Toàn màn hình & Closed Shadow DOM:**
+  - Đưa giao diện phụ đề vào Closed Shadow DOM (`attachShadow({ mode: "closed" })`) với CSS inline, ngăn chặn xung đột CSS với trang web.
+  - Tự động gắn overlay vào `document.fullscreenElement` khi xem video chế độ toàn màn hình.
+- **Tùy chọn Ngôn ngữ & Bộ lọc Lặp từ Tiếng Việt:**
+  - Bổ sung danh sách chọn ngôn ngữ (`SET_LANGUAGE`) trên popup (Tự động, Tiếng Việt, Tiếng Anh, Tiếng Nhật, v.v.).
+  - Sửa regex lọc lặp từ Whisper sang Unicode Character Properties, hoạt động chính xác với dấu tiếng Việt.
+- **Bộ kiểm thử Tự động (Unit Tests):**
+  - Bổ sung test tự động kiểm thử DSP, Resampler, Chunker, BoundedQueue và bộ lọc Unicode trong `tests/audio-pipeline.test.ts`.
+
+### Fixed
+- **Xóa bỏ Race Condition khi khởi tạo thu âm:**
+  - Offscreen document chỉ phản hồi sau khi `getUserMedia` và AudioWorklet thực sự khởi động thành công.
+  - Bổ sung timeout 12s cho suy luận ASR, tự động dọn dẹp và khôi phục Web Worker khi gặp lỗi.
+  - Áp dụng Generation Token (`loopGeneration`) và kiểm tra `sessionId` chống chạy song song 2 vòng lặp hoặc phụ đề phiên cũ rò rỉ sang phiên mới.
+- **Tối ưu Kích thước Bundle WASM:**
+  - Loại bỏ các biến thể WASM thừa (`jsep`, `jspi`, non-asyncify) và bản `.wasm` trùng lặp trong Vite build, giảm kích thước runtime từ 109MB xuống 27MB (trước khi cộng model).
+
+---
+
 ## [0.3.0] - 2026-11-23
 ### Added
 - **Tối ưu hóa UI Trải nghiệm Người dùng (Minimalist One-Click Subtitle UI):**

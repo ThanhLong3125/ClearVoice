@@ -28,12 +28,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Bước 4: Kiểm tra lỗi kiểu dữ liệu TypeScript
-      - name: Typecheck (TypeScript)
-        run: npm run typecheck
+      # Bước 4: Tải model đóng gói sẵn để test và build
+      - name: Fetch Bundled Model
+        run: npm run fetch-model
 
-      # Bước 5: Build dự án Vite ra thư mục dist/
-      - name: Build Chrome Extension
+      # Bước 5: Chạy Unit Tests
+      - name: Run Unit Tests
+        run: npm test
+
+      # Bước 6: Kiểm tra TypeScript & Build dự án Vite ra thư mục dist/
+      - name: Typecheck & Build Chrome Extension
         run: npm run build
 
       # Bước 6: Lưu trữ thư mục dist/ thành Artifact để tải về dùng thử

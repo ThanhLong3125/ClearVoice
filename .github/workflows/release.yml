@@ -31,9 +31,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Bước 4: Kiểm tra TypeScript & Build extension ra thư mục dist/
-      - name: Build Extension
-        run: npm run build
+      # Bước 4: Kiểm tra đồng bộ version tag, tải model, chạy Unit Tests & Build extension ra thư mục dist/
+      - name: Verify Tag Version, Test & Build Extension
+        run: |
+          PKG_VER="v$(node -p "require('./package.json').version")"
+          if [ "${{ github.ref_name }}" != "$PKG_VER" ]; then
+            echo "Tag ${{ github.ref_name }} does not match package.json version $PKG_VER"
+            exit 1
+          fi
+          npm run fetch-model
+          npm test
+          npm run build
 
       # Bước 5: Nén toàn bộ nội dung thư mục dist/ thành file zip
       - name: Package extension into zip

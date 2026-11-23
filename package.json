@@ -1,12 +1,14 @@
 {
   "name": "clearvoice",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Local-first browser audio capture, streaming processing, and AI transcription.",
   "type": "module",
   "scripts": {
     "dev": "vite build --watch --mode development",
+    "fetch-model": "node scripts/fetch-model.mjs",
     "build": "tsc --noEmit && vite build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --input-type=module -e 'import { build } from \"vite\"; await build({ configFile: false, logLevel: \"silent\", build: { ssr: \"tests/audio-pipeline.test.ts\", outDir: \".test-dist\", emptyOutDir: true } });' && node --test .test-dist/audio-pipeline.test.js && rm -rf .test-dist"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.308",
