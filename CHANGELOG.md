@@ -13,6 +13,7 @@ Tất cả các thay đổi đáng chú ý của dự án **ClearVoice** sẽ đ
 
 ## [0.2.0] - 2026-11-23
 ### Added
+- **Kích hoạt Đa nhân WASM (`COOP/COEP` + `SharedArrayBuffer` + `numThreads = 4`) & Pre-warm Pthread Pool:** Khai báo `cross_origin_opener_policy: "same-origin"` và `cross_origin_embedder_policy: "require-corp"` trong `manifest.json` để bật `self.crossOriginIsolated = true`, cho phép ONNX Runtime huy động 4 luồng CPU chạy song song (`numThreads = 4` trên máy 8 luồng) kèm bước chạy làm nóng (`pre-warm`) ngay khi nạp xong mô hình.
 - **Nhả chữ từng từ theo thời gian thực (`WhisperTextStreamer`):** Tích hợp `WhisperTextStreamer` phát trực tiếp từng token (`status: "partial"`) ngay khi bộ giải mã Whisper vừa sinh ra từ mới (~40–60ms/từ) kèm rút ngắn khung gom câu nhạy hơn (`min = 0.75s`, `max = 2.0s`, `pause = 160ms`), giảm 70% thời gian chờ chữ đầu tiên xuất hiện trên màn hình.
 - **Web Worker ASR Engine (`src/offscreen/asr-worker.ts`):** Tách toàn bộ quá trình tải mô hình, biên dịch WASM và suy luận Whisper sang luồng Web Worker riêng biệt, giải phóng 100% luồng giao diện chính (Main UI Thread) của Extension.
 - **Tự động nhận diện đa ngôn ngữ 1 bước (`WhisperAutoLangLogitsProcessor`):** Can thiệp trực tiếp vào logits bước giải mã đầu tiên của Whisper để tự động nhận diện ngôn ngữ (`vi`, `en`, `zh`, `ja`, `ko`, `fr`, `de`, `es`, `ru`) trên từng đoạn âm thanh mà không cần người dùng chọn thủ công.

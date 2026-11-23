@@ -37,14 +37,22 @@ function resolveExtensionWasmPaths(): { mjs: string; wasm: string } | undefined 
   return undefined;
 }
 
-// Configure ONNX Runtime WASM to avoid SharedArrayBuffer and MV3 external script CSP issues
+// Configure ONNX Runtime WASM with multi-threading (SharedArrayBuffer via MV3 COOP/COEP)
 if (env.backends?.onnx?.wasm) {
-  env.backends.onnx.wasm.numThreads = 1;
+  const isIsolated = typeof self !== "undefined" && self.crossOriginIsolated === true;
+  const hwThreads =
+    typeof navigator !== "undefined" && navigator.hardwareConcurrency
+      ? navigator.hardwareConcurrency
+      : 4;
+  env.backends.onnx.wasm.numThreads = isIsolated ? Math.min(4, Math.max(2, Math.floor(hwThreads / 2))) : 1;
   env.backends.onnx.wasm.proxy = false;
   const paths = resolveExtensionWasmPaths();
   if (paths) {
     env.backends.onnx.wasm.wasmPaths = paths;
   }
+  console.log(
+    `[ClearVoice AI] WASM Config | crossOriginIsolated=${isIsolated} | numThreads=${env.backends.onnx.wasm.numThreads} (hw=${hwThreads})`
+  );
 }
 
 export type AsrState = "idle" | "loading" | "ready" | "inferring" | "error";
@@ -190,8 +198,19 @@ export class LocalAsrEngine {
 
         this.prepareAutoLanguageDetector();
         this.activeDevice = "wasm";
+
+        // Pre-warm the multi-threaded WASM pthread pool & ONNX graph with a 1-token dummy pass
+        try {
+          await this.transcriber(new Float32Array(1600), {
+            return_timestamps: false,
+            max_new_tokens: 1,
+          });
+        } catch {
+          // Ignore warm-up error
+        }
+
         this.state = "ready";
-        console.log("[ClearVoice AI] Whisper Q4 Model successfully initialized with Auto-Language Detection!");
+        console.log("[ClearVoice AI] Whisper Q4 Model successfully initialized & pre-warmed (Multi-Thread WASM)!");
       } catch (wasmError) {
         this.initPromise = null; // Allow retry on failure
         this.state = "error";
