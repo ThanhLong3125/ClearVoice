@@ -3,7 +3,10 @@ import "./overlay.css";
 
 let overlayContainer: HTMLDivElement | null = null;
 let subtitleBox: HTMLDivElement | null = null;
+let prevLineBox: HTMLDivElement | null = null;
+let currLineBox: HTMLDivElement | null = null;
 let hideTimer: number | null = null;
+let lastFinalText: string = "";
 
 let liveBadge: HTMLDivElement | null = null;
 let badgeVolumeLevel: HTMLDivElement | null = null;
@@ -56,6 +59,16 @@ function ensureOverlayDOM(): void {
 
   subtitleBox = document.createElement("div");
   subtitleBox.className = "clearvoice-subtitle-box";
+
+  prevLineBox = document.createElement("div");
+  prevLineBox.className = "clearvoice-line prev";
+  prevLineBox.style.display = "none";
+
+  currLineBox = document.createElement("div");
+  currLineBox.className = "clearvoice-line curr";
+
+  subtitleBox.appendChild(prevLineBox);
+  subtitleBox.appendChild(currLineBox);
   overlayContainer.appendChild(subtitleBox);
 
   document.body.appendChild(overlayContainer);
@@ -63,23 +76,33 @@ function ensureOverlayDOM(): void {
 
 function displaySubtitle(text: string, status: "partial" | "final" | "uncertain"): void {
   ensureOverlayDOM();
-  if (!overlayContainer || !subtitleBox) return;
+  if (!overlayContainer || !currLineBox || !prevLineBox) return;
 
-  subtitleBox.textContent = text;
-  subtitleBox.className = `clearvoice-subtitle-box ${status}`;
+  const clean = text.trim();
+  if (!clean) return;
+
+  currLineBox.textContent = clean;
+  currLineBox.className = `clearvoice-line curr ${status}`;
+
+  if (lastFinalText && lastFinalText !== clean) {
+    prevLineBox.textContent = lastFinalText;
+    prevLineBox.style.display = "block";
+  }
+
   overlayContainer.style.display = "block";
 
-  // Auto-hide subtitle after 5 seconds of inactivity if final
   if (hideTimer) {
     window.clearTimeout(hideTimer);
+    hideTimer = null;
   }
 
   if (status === "final") {
+    lastFinalText = clean;
     hideTimer = window.setTimeout(() => {
       if (overlayContainer) {
         overlayContainer.style.display = "none";
       }
-    }, 5000);
+    }, 6000);
   }
 }
 

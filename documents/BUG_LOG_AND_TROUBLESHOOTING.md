@@ -23,6 +23,7 @@
 | **BUG-013** | Phụ đề bị trễ 2–3 câu so với video, turn đầu bịa chữ ở cuối câu rồi turn sau mới chuẩn | Cửa sổ trượt cố định (`window 3s, hop 1s`) cắt đứt ngang âm tiết và chồng lấp 2s (bắt AI dịch lặp 3 lần) kết hợp hàng đợi FIFO `5/5` | Thay bằng `Dynamic VAD-Pause & Minimum-Energy Valley Chunker` (0% chồng lấp, cắt tại điểm ngắt hơi/năng lượng cực tiểu) và hàng đợi `Coalesce & Drop-Stale` | ✅ Đã sửa |
 | **BUG-014** | Tiện ích không nhận được âm thanh (`AbortError: Error starting tab capture` hoặc Volume Meter = 0%) | COEP `require-corp` trong `manifest.json` chặn quyền nạp luồng media từ tab khác vào Extension; AudioContext trong offscreen document bị rơi vào trạng thái `"suspended"` khi khởi tạo bất đồng bộ | Gỡ bỏ COOP/COEP khỏi `manifest.json` và bổ sung `audioContext.resume()` ngay sau khi khởi tạo cùng vòng lặp bảo vệ trong `volumeInterval` | ✅ Đã sửa |
 | **BUG-015** | Đột ngột crash hoặc không thể khởi động AI khi gán cứng `device: "webgpu"` trên các môi trường thiếu GPU adapter (Linux headless, Docker, driver cũ) | API WebGPU (`navigator.gpu`) có thể trả về `undefined` hoặc `requestAdapter()` trả về `null` nếu trình duyệt không có phần cứng/driver đồ họa tương thích | Xây dựng cơ chế thăm dò và chuyển đổi thích ứng (`checkWebGpuSupport()`), ưu tiên WebGPU và tự động lùi về WASM SIMD (Zero-crash Adaptive Multi-Backend) | ✅ Đã sửa |
+| **BUG-016** | Phụ đề bị nhảy chữ liên tục ("chưa kịp đọc xong đã biến mất") và AI dịch kém chất lượng do dropout chunk âm thanh | `pauseDurationMs: 160ms` và `minChunkDurationSec: 0.75s` xé vụn tiếng nói thành các mẩu 1–2 từ (thiếu ngữ cảnh ngữ pháp), hàng đợi `maxQueueCapacity: 2` và `maxCoalesced: 2.2s` vứt bỏ (drop-stale) các mẩu ở giữa, kết hợp khung phụ đề đơn dòng xóa đè câu cũ ngay khi từ mới bắt đầu xuất hiện | Nâng ngưỡng cắt nhịp câu tự nhiên (`min: 1.4s`, `pause: 280ms`, `max: 3.0s`), tăng dung lượng gộp câu không mất chữ (`maxCoalesced: 4.2s`, `capacity: 4`), và xây dựng Cửa sổ cuộn 2 dòng (Rolling 2-Line Subtitle Window) lưu câu trước 6s | ✅ Đã sửa |
 
 ---
 
@@ -121,5 +122,22 @@
      - **Bước 1 (Ưu tiên):** Nếu máy có GPU hỗ trợ WebGPU, nạp Whisper Q4 trên WebGPU (`device: "webgpu"`), suy luận siêu tốc 80–150ms/câu, không cần COOP/COEP và hoàn toàn không xung đột với `tabCapture`.
      - **Bước 2 (Dự phòng tự động):** Nếu không có WebGPU hoặc shader compile thất bại, lập tức tự động lùi về WASM SIMD (`device: "wasm"`) mà không làm gián đoạn hay báo lỗi cho người dùng.
      - **Giao diện Popup:** Tự động phát hiện và hiển thị huy hiệu `Sẵn sàng (WEBGPU ⚡)` hoặc `Sẵn sàng (WASM SIMD)`.
+
+---
+
+### 8. BUG-016: Hiện tượng Nhảy chữ, Mất chữ (Dropout) và Cân bằng Real-time với Chất lượng Dịch
+* **Triệu chứng:** Người dùng phản ánh chưa kịp đọc xong câu này thì chữ đã bị giật/nhảy sang câu khác, đồng thời câu dịch bị rời rạc, chắp vá hoặc mất hẳn một vế câu do hệ thống phải dropout âm thanh.
+* **Nguyên nhân gốc rễ:**
+  1. **Cắt chunk quá vụn (`minChunkDurationSec: 0.75s`, `pauseDurationMs: 160ms`):** Một khoảng lặng 160ms chỉ là ngắt giữa 2 âm tiết trong câu nói bình thường. Việc cắt ngay sau 0.75s khiến âm thanh bị băm nhỏ thành các mẩu 1–2 từ. Mô hình Transformer (Whisper) khi nhận một mẩu quá ngắn sẽ mất hoàn toàn cấu trúc ngữ pháp và ngữ cảnh âm học, dẫn tới dịch sai hoặc hallucinate.
+  2. **Tần suất sinh chunk quá dày gây nghẽn và Dropout âm thanh:** Cứ 0.8s lại sinh ra một chunk, vượt quá năng lực tiêu thụ và làm đầy hàng đợi nhỏ (`capacity: 2`). Bộ đệm gộp cũ chỉ cho phép tối đa `2.2s`, khiến mọi chunk thứ hai đều bị vứt bỏ (`drop-stale`). Hậu quả là 1–2 giây tiếng nói thật của video bị ném vào sọt rác, gây mất vế câu!
+  3. **Giao diện phụ đề đơn dòng bị ghi đè tức thì:** Mỗi khi một chunk mới bắt đầu nhả chữ (dù mới chỉ là từ đầu tiên), khung phụ đề cũ lập tức bị gán đè `textContent = text`, xóa sạch câu trước khiến mắt người dùng chưa kịp đọc đã biến mất.
+* **Cách xử lý cân bằng (State-of-the-Art Live Captioning):**
+  1. **Cân chỉnh ngưỡng nhịp nói tự nhiên (`src/audio/chunker.ts`):** Nâng `minChunkDurationSec` lên **1.4s**, `pauseDurationMs` lên **280ms** (ngắt hơi thật sự), và `windowDurationSec` lên **3.0s**. Mỗi chunk giờ đây là một mệnh đề hoàn chỉnh, giúp chất lượng dịch chính xác hơn gấp nhiều lần.
+  2. **Cơ chế Gộp câu Không mất chữ (Zero-loss Coalescing) (`src/audio/pipeline.ts` & `src/offscreen/offscreen.ts`):** Tăng dung lượng hàng đợi lên **4** và trần gộp câu lên **4.2s**. Thay vì vứt bỏ, hệ thống tự động nối các cụm từ ngắn thành 1 audio buffer duy nhất. Whisper giải mã 3.5s chỉ tốn thời gian tương đương đoạn ngắn nhưng giữ trọn vẹn 100% lời nói.
+  3. **Cửa sổ phụ đề cuộn 2 dòng (Rolling 2-Line Subtitle Window) (`src/content/overlay.ts` & `src/popup/popup.ts`):**
+     - **Dòng trên (Previous Line):** Lưu giữ câu vừa hoàn thành trước đó với màu chữ dịu (`#94a3b8`), giữ nguyên trên màn hình ít nhất 6 giây để người dùng đọc tiếp câu trước.
+     - **Dòng dưới (Current Line):** Nhả chữ từng từ theo thời gian thực cho câu đang nói (`#ffffff` / `#38bdf8`).
+     - Khi câu mới hoàn thành, nó tự động trượt lên dòng trên một cách êm ái, chấm dứt hoàn toàn tình trạng nhảy giật chữ.
+
 
 

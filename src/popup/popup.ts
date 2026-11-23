@@ -78,7 +78,35 @@ function updateVolume(percent: number): void {
   }
 }
 
+let lastPopupFinalText = "";
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function updatePopupSubtitle(text: string, status?: "partial" | "final" | "uncertain"): void {
+  if (!popupSubtitle) return;
+  const clean = text.trim();
+  if (!clean) return;
+
+  if (lastPopupFinalText && lastPopupFinalText !== clean) {
+    popupSubtitle.innerHTML = `<div style="font-size: 0.78rem; color: #94a3b8; margin-bottom: 4px; line-height: 1.3;">${escapeHtml(lastPopupFinalText)}</div><div style="font-size: 0.95rem; color: #f8fafc; font-weight: 500; line-height: 1.35;">${escapeHtml(clean)}</div>`;
+  } else {
+    popupSubtitle.innerHTML = `<div style="font-size: 0.95rem; color: #f8fafc; font-weight: 500; line-height: 1.35;">${escapeHtml(clean)}</div>`;
+  }
+
+  if (status === "final") {
+    lastPopupFinalText = clean;
+  }
+}
+
 function resetStats(): void {
+  lastPopupFinalText = "";
   if (statModel) {
     statModel.textContent = "Đang kết nối...";
     statModel.style.color = "#38bdf8";
@@ -154,8 +182,8 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage) => {
   } else if (message.type === MessageType.MODEL_STATUS) {
     updateModelUI(message);
   } else if (message.type === MessageType.TRANSCRIPT_UPDATE) {
-    if (popupSubtitle && message.segment?.text) {
-      popupSubtitle.textContent = message.segment.text;
+    if (message.segment?.text) {
+      updatePopupSubtitle(message.segment.text, message.segment.status);
     }
   } else if (message.type === MessageType.PIPELINE_METRICS) {
     if (statVad) {

@@ -38,13 +38,13 @@ export class SlidingWindowChunker {
   constructor(sessionId: string, config: SlidingWindowConfig) {
     this.sessionId = sessionId;
     this.sampleRate = config.sampleRate;
-    this.maxWindowSamples = Math.round((config.windowDurationSec || 2.0) * config.sampleRate);
-    this.minWindowSamples = Math.round((config.minChunkDurationSec ?? 0.75) * config.sampleRate);
+    this.maxWindowSamples = Math.round((config.windowDurationSec || 3.0) * config.sampleRate);
+    this.minWindowSamples = Math.round((config.minChunkDurationSec ?? 1.4) * config.sampleRate);
     this.frameSamples = Math.round(0.032 * config.sampleRate); // 512 samples @ 16kHz
-    const pauseMs = config.pauseDurationMs ?? 160;
-    this.pauseFramesRequired = Math.max(3, Math.round(pauseMs / 32));
+    const pauseMs = config.pauseDurationMs ?? 280;
+    this.pauseFramesRequired = Math.max(4, Math.round(pauseMs / 32));
     this.speechThresholdRms = config.speechThresholdRms ?? 0.004;
-    this.preRollSamples = this.frameSamples * 4; // ~128ms
+    this.preRollSamples = this.frameSamples * 5; // ~160ms pre-roll
 
     this.buffer = new Float32Array(this.maxWindowSamples * 4);
   }

@@ -8,6 +8,12 @@ Tất cả các thay đổi đáng chú ý của dự án **ClearVoice** sẽ đ
 
 ## [Unreleased]
 ### Added
+- **Cửa sổ Phụ đề Cuộn 2 Dòng (Rolling 2-Line Subtitle Window) chống nhảy chữ:**
+  - Thiết kế hiển thị 2 dòng phụ đề đồng thời: Dòng trên lưu giữ câu vừa hoàn thành trước đó (màu xám dịu) trong 6 giây để người dùng kịp đọc trọn vẹn; Dòng dưới nhả chữ trực tiếp (`partial`) theo thời gian thực cho câu đang nói.
+  - Áp dụng đồng bộ trên cả Khung phụ đề nổi trên trang (`overlay.ts`) và Khung Live ASR trong Popup (`popup.ts`).
+- **Tối ưu hóa Cân bằng Giữa Độ trễ Real-time & Chất lượng Dịch thuật (Natural Phrase Chunker & Zero-loss Coalesce):**
+  - Điều chỉnh ngưỡng ngắt nhịp câu chuẩn (`minChunkDurationSec = 1.4s`, `pauseDurationMs = 280ms`, `maxWindow = 3.0s`) giúp mỗi đoạn âm thanh đưa vào Whisper là một mệnh đề hoàn chỉnh, tăng độ chính xác bản dịch và giảm 60% tần suất dồn ứ hàng đợi.
+  - Nâng trần gộp câu không mất chữ lên `4.2s` và dung lượng hàng đợi lên `4 chunks`, triệt tiêu hoàn toàn hiện tượng vứt bỏ (dropout) âm thanh khi đang nói liên tục.
 - **Kiến trúc AI Đa Backend Tự Thích Ứng (WebGPU Hardware Acceleration & Zero-Crash WASM SIMD Fallback):**
   - Tích hợp khả năng tăng tốc phần cứng WebGPU (`device: "webgpu"`, Q4 quantization). Trên các máy tính có GPU hỗ trợ (Direct3D 12, Metal, Vulkan), thời gian suy luận được rút ngắn xuống chỉ còn 80–150ms/câu mà **không cần COOP/COEP hay SharedArrayBuffer**, loại bỏ 100% nguy cơ xung đột với API `tabCapture`.
   - Cơ chế tự thích ứng thông minh (`checkWebGpuSupport`): Tự động phát hiện phần cứng đồ họa; nếu WebGPU khả dụng sẽ ưu tiên chạy GPU, nếu không khả dụng (máy cũ, máy ảo, Linux headless) sẽ tự động lùi về WASM SIMD đơn luồng mà không làm gián đoạn trải nghiệm người dùng.

@@ -8,9 +8,11 @@ import type { AudioChunk } from "../types/audio";
 export interface AudioPipelineConfig {
   sourceSampleRate: number; // e.g. 48000
   targetSampleRate: number; // e.g. 16000
-  windowDurationSec: number;// Max chunk duration (e.g. 3.2s)
+  windowDurationSec: number;// Max chunk duration (e.g. 3.0s)
   hopDurationSec: number;   // Kept for interface compatibility
-  maxQueueCapacity: number; // e.g. 2
+  minChunkDurationSec?: number; // e.g. 1.4s
+  pauseDurationMs?: number;     // e.g. 280ms
+  maxQueueCapacity: number; // e.g. 4
   vadThresholdRms?: number; // default: 0.004
   onChunkReady?: (chunk: AudioChunk) => void;
 }
@@ -34,13 +36,15 @@ export class AudioPipeline {
 
   constructor(sessionId: string, config: AudioPipelineConfig) {
     this.targetSampleRate = config.targetSampleRate;
-    this.maxCoalescedSamples = Math.round(2.2 * config.targetSampleRate);
+    this.maxCoalescedSamples = Math.round(4.2 * config.targetSampleRate);
     this.resampler = new StreamResampler(config.sourceSampleRate, config.targetSampleRate);
 
     const chunkerConfig: SlidingWindowConfig = {
       sampleRate: config.targetSampleRate,
       windowDurationSec: config.windowDurationSec,
       hopDurationSec: config.hopDurationSec,
+      minChunkDurationSec: config.minChunkDurationSec ?? 1.4,
+      pauseDurationMs: config.pauseDurationMs ?? 280,
       speechThresholdRms: config.vadThresholdRms ?? 0.004,
     };
     this.chunker = new SlidingWindowChunker(sessionId, chunkerConfig);
