@@ -22,6 +22,15 @@ let lastProgressSentAt = 0;
 function ensureAsrWorker(): void {
   if (!asrWorker) {
     asrWorker = new Worker(new URL("./asr-worker.ts", import.meta.url), { type: "module" });
+    asrWorker.onerror = (err) => {
+      workerState = "error";
+      console.error("[ClearVoice Offscreen] ASR Worker error:", err);
+      chrome.runtime.sendMessage<ExtensionMessage>({
+        type: MessageType.MODEL_STATUS,
+        status: "error",
+        error: err.message || "Lỗi khởi tạo ASR Worker",
+      }).catch(() => {});
+    };
     asrWorker.onmessage = (event: MessageEvent<WorkerOutMessage>) => {
       const msg = event.data;
       if (!msg) return;
@@ -72,6 +81,12 @@ function ensureAsrWorker(): void {
 
   if (workerState !== "ready" && workerState !== "loading") {
     workerState = "loading";
+    chrome.runtime.sendMessage<ExtensionMessage>({
+      type: MessageType.MODEL_STATUS,
+      status: "loading",
+      progress: 0,
+      file: "whisper-tiny",
+    }).catch(() => {});
     asrWorker.postMessage({ type: "INIT" } satisfies WorkerInMessage);
   }
 }
@@ -129,7 +144,16 @@ async function runAsrConsumerLoop(): Promise<void> {
  */
 async function handleInitAudioCapture(streamId: string, sessionId: string): Promise<void> {
   try {
+    // Release any previous session resources first
+    if (currentStream || audioContext) {
+      stopAudioCapture();
+    }
+
     currentSessionId = sessionId;
+
+    // Immediately start warming up the Local AI ASR Engine in background Web Worker
+    // BEFORE waiting on getUserMedia or AudioWorklet so model loading never gets blocked
+    ensureAsrWorker();
 
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
@@ -285,15 +309,20 @@ function stopAudioCapture(): void {
   currentSessionId = null;
 }
 
+// Start warming up the ASR Web Worker as soon as the offscreen document loads
+ensureAsrWorker();
+
 // Listen for commands from Service Worker
-chrome.runtime.onMessage.addListener((message: ExtensionMessage) => {
+chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
   switch (message.type) {
     case MessageType.INIT_AUDIO_CAPTURE:
       handleInitAudioCapture(message.streamId, message.sessionId);
+      sendResponse({ ok: true });
       break;
 
     case MessageType.STOP_AUDIO_CAPTURE:
       stopAudioCapture();
+      sendResponse({ ok: true });
       break;
   }
 });

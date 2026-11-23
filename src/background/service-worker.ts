@@ -77,12 +77,21 @@ async function startCapture(targetTabId: number): Promise<void> {
       });
     });
 
-    // 3. Send command to Offscreen document to begin getUserMedia
-    chrome.runtime.sendMessage<ExtensionMessage>({
+    // 3. Send command to Offscreen document to begin getUserMedia (with retry while offscreen module loads)
+    const initMsg: ExtensionMessage = {
       type: MessageType.INIT_AUDIO_CAPTURE,
       streamId,
       sessionId: activeSessionId,
-    });
+    };
+    for (let attempt = 0; attempt < 10; attempt++) {
+      try {
+        const ack = await chrome.runtime.sendMessage<ExtensionMessage, { ok?: boolean }>(initMsg);
+        if (ack && ack.ok) break;
+      } catch {
+        // Offscreen document script still initializing
+      }
+      await new Promise((r) => setTimeout(r, 60));
+    }
 
     // 4. Ensure Content Script & CSS are injected into the captured tab
     try {
@@ -137,6 +146,11 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendRe
       sendResponse({ state: currentState, error: lastErrorMsg, modelStatus: lastModelStatus, lastTranscript });
       break;
 
+    case MessageType.STATUS_UPDATE:
+      currentState = message.state;
+      lastErrorMsg = message.error;
+      break;
+
     case MessageType.MODEL_STATUS:
       if (lastModelStatus.status === "error" && message.status === "loading") {
         break;
@@ -189,3 +203,6 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     stopCapture();
   }
 });
+
+// Pre-warm offscreen document & ASR worker when extension loads
+ensureOffscreenDocument().catch(() => {});

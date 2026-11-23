@@ -198,19 +198,8 @@ export class LocalAsrEngine {
 
         this.prepareAutoLanguageDetector();
         this.activeDevice = "wasm";
-
-        // Pre-warm the multi-threaded WASM pthread pool & ONNX graph with a 1-token dummy pass
-        try {
-          await this.transcriber(new Float32Array(1600), {
-            return_timestamps: false,
-            max_new_tokens: 1,
-          });
-        } catch {
-          // Ignore warm-up error
-        }
-
         this.state = "ready";
-        console.log("[ClearVoice AI] Whisper Q4 Model successfully initialized & pre-warmed (Multi-Thread WASM)!");
+        console.log("[ClearVoice AI] Whisper Q4 Model successfully initialized with Auto-Language Detection!");
       } catch (wasmError) {
         this.initPromise = null; // Allow retry on failure
         this.state = "error";
