@@ -115,6 +115,30 @@ body {
   word-break: break-word;
 }
 
+.lang-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.lang-label {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
+.lang-select {
+  flex: 1;
+  background: var(--card-bg);
+  color: var(--text-main);
+  border: 1px solid #334155;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 0.82rem;
+  font-family: var(--font-family);
+}
+
 .controls {
   display: flex;
   flex-direction: column;

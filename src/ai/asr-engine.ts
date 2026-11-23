@@ -8,10 +8,33 @@ import {
 } from "@huggingface/transformers";
 import type { AudioChunk, TranscriptSegment } from "../types/audio";
 
-// Configure browser-friendly environment
-env.allowLocalModels = false;
-env.useBrowserCache = true;
+// Configure browser-friendly environment for 100% offline local model inference
+env.allowLocalModels = true;
+env.allowRemoteModels = false;
+env.useBrowserCache = false;
+env.useFS = false;
 env.useWasmCache = false;
+
+function resolveExtensionBaseUrl(): string {
+  try {
+    if (typeof chrome !== "undefined" && chrome.runtime?.getURL) {
+      return chrome.runtime.getURL("");
+    }
+  } catch {
+    // Fallback below
+  }
+  try {
+    if (typeof self !== "undefined" && self.location?.origin?.startsWith("chrome-extension://")) {
+      return `${self.location.origin}/`;
+    }
+  } catch {
+    // Fallback
+  }
+  return "/";
+}
+
+const EXTENSION_BASE_URL = resolveExtensionBaseUrl();
+env.localModelPath = `${EXTENSION_BASE_URL}models/`;
 
 function resolveExtensionWasmPaths(): { mjs: string; wasm: string } | undefined {
   try {
@@ -58,6 +81,8 @@ export interface AsrProgress {
   status?: string;
 }
 
+const WHISPER_MODEL_ID = "whisper-tiny";
+
 // Candidate languages for auto-detection (prevents tiny model from misfiring into obscure languages on noise)
 const ALLOWED_AUTO_LANG_TOKENS = new Set([
   "<|vi|>",
@@ -71,9 +96,15 @@ const ALLOWED_AUTO_LANG_TOKENS = new Set([
   "<|ru|>",
 ]);
 
+const UNICODE_WORD = "[\\p{L}\\p{M}\\p{N}]+";
+const REPETITION_REGEX = new RegExp(
+  `(?<![\\p{L}\\p{M}\\p{N}])(${UNICODE_WORD}(?:[\\s,]+${UNICODE_WORD}){0,3})(?:[\\s,]+\\1){2,}(?![\\p{L}\\p{M}\\p{N}])`,
+  "giu"
+);
+
 /**
  * Single-pass Whisper Automatic Language Detection + Prefix Enforcer:
- * - Step 1 (seqLen === 1): Lets Whisper's cross-attention pick the highest-probability language token from audio.
+ * - Step 1 (seqLen === 1): Forces explicit language token if selected/locked, otherwise picks highest-probability allowed language token.
  * - Step 2 (seqLen === 2): Forces <|transcribe|> token (never translates to English when another language is spoken).
  * - Step 3 (seqLen === 3): Forces <|notimestamps|> token.
  * - Step 4 (seqLen === 4): Suppresses blank/EOS tokens so actual speech tokens are decoded.
@@ -83,18 +114,24 @@ class WhisperAutoLangLogitsProcessor extends LogitsProcessor {
   private readonly transcribeTokenId: number;
   private readonly noTimestampsTokenId: number;
   private readonly beginSuppressTokens: number[];
+  private readonly getForcedLangId: () => number | null;
+  private readonly onLanguagePicked: (tokenId: number) => void;
 
   constructor(
     allowedLangIds: Set<number>,
     transcribeTokenId: number,
     noTimestampsTokenId: number,
-    beginSuppressTokens: number[]
+    beginSuppressTokens: number[],
+    getForcedLangId: () => number | null,
+    onLanguagePicked: (tokenId: number) => void
   ) {
     super();
     this.allowedLangIds = allowedLangIds;
     this.transcribeTokenId = transcribeTokenId;
     this.noTimestampsTokenId = noTimestampsTokenId;
     this.beginSuppressTokens = beginSuppressTokens;
+    this.getForcedLangId = getForcedLangId;
+    this.onLanguagePicked = onLanguagePicked;
   }
 
   public _call(input_ids: bigint[][], logits: { data: Float32Array }): { data: Float32Array } {
@@ -102,9 +139,24 @@ class WhisperAutoLangLogitsProcessor extends LogitsProcessor {
     const data = logits.data;
 
     if (seqLen === 1) {
-      for (let i = 0; i < data.length; i++) {
-        if (!this.allowedLangIds.has(i)) {
-          data[i] = -Infinity;
+      const forcedId = this.getForcedLangId();
+      if (forcedId !== null && forcedId >= 0 && forcedId < data.length) {
+        data.fill(-Infinity);
+        data[forcedId] = 0;
+        this.onLanguagePicked(forcedId);
+      } else {
+        let bestId = -1;
+        let bestScore = -Infinity;
+        for (let i = 0; i < data.length; i++) {
+          if (!this.allowedLangIds.has(i)) {
+            data[i] = -Infinity;
+          } else if (data[i] > bestScore) {
+            bestScore = data[i];
+            bestId = i;
+          }
+        }
+        if (bestId !== -1) {
+          this.onLanguagePicked(bestId);
         }
       }
     } else if (seqLen === 2) {
@@ -122,6 +174,21 @@ class WhisperAutoLangLogitsProcessor extends LogitsProcessor {
     }
     return logits;
   }
+}
+
+/**
+ * Filters out common Whisper non-speech hallucinations and collapses Unicode repetitive phrase loops.
+ */
+export function cleanHallucinatedText(raw: string): string {
+  if (!raw) return "";
+  // Remove bracketed/parenthesized noise tags such as [Music], (nhạc), [Applause]
+  let cleaned = raw.replace(/\[[^\]]*\]|\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
+  if (!cleaned || /^[\p{P}\p{S}\s]+$/u.test(cleaned)) {
+    return "";
+  }
+  // Collapse consecutive 3+ repetitions of the same word/phrase (Unicode-aware for Vietnamese diacritics)
+  cleaned = cleaned.replace(REPETITION_REGEX, "$1");
+  return cleaned.trim();
 }
 
 async function checkWebGpuSupport(): Promise<boolean> {
@@ -150,6 +217,25 @@ export class LocalAsrEngine {
 
   private decoderStartTokenId: number = 50258;
   private autoLangProcessorList: LogitsProcessorList | null = null;
+  private langTokenToId: Map<string, number> = new Map();
+  private selectedLanguage: string = "auto"; // "auto" or ISO code like "vi", "en"
+  private lockedAutoLangId: number | null = null;
+  private candidateAutoLangId: number | null = null;
+  private candidateAutoLangStreak: number = 0;
+
+  public setLanguage(language: string): void {
+    const normalized = (language || "auto").trim().toLowerCase();
+    if (this.selectedLanguage !== normalized) {
+      this.selectedLanguage = normalized;
+      this.lockedAutoLangId = null;
+      this.candidateAutoLangId = null;
+      this.candidateAutoLangStreak = 0;
+    }
+  }
+
+  public getLanguage(): string {
+    return this.selectedLanguage;
+  }
 
   public getState(): AsrState {
     return this.state;
@@ -200,10 +286,11 @@ export class LocalAsrEngine {
           console.log("[ClearVoice AI] WebGPU hardware detected. Attempting WebGPU Q4 pipeline...");
           this.transcriber = (await pipeline(
             "automatic-speech-recognition",
-            "onnx-community/whisper-tiny",
+            WHISPER_MODEL_ID,
             {
               device: "webgpu",
               dtype: "q4",
+              local_files_only: true,
               progress_callback: progressCallback,
             }
           )) as AutomaticSpeechRecognitionPipeline;
@@ -229,10 +316,11 @@ export class LocalAsrEngine {
       try {
         this.transcriber = (await pipeline(
           "automatic-speech-recognition",
-          "onnx-community/whisper-tiny",
+          WHISPER_MODEL_ID,
           {
             device: "wasm",
             dtype: "q4",
+            local_files_only: true,
             progress_callback: progressCallback,
           }
         )) as AutomaticSpeechRecognitionPipeline;
@@ -276,7 +364,10 @@ export class LocalAsrEngine {
 
     this.decoderStartTokenId = gc.decoder_start_token_id ?? 50258;
     const allowedIds = new Set<number>();
+    this.langTokenToId.clear();
     for (const [token, id] of Object.entries(gc.lang_to_id)) {
+      const code = token.replace(/^<\|/, "").replace(/\|>$/, "").toLowerCase();
+      this.langTokenToId.set(code, id);
       if (ALLOWED_AUTO_LANG_TOKENS.has(token)) {
         allowedIds.add(id);
       }
@@ -292,7 +383,32 @@ export class LocalAsrEngine {
     const beginSuppress = gc.begin_suppress_tokens ?? [220, 50257];
 
     const list = new LogitsProcessorList();
-    list.push(new WhisperAutoLangLogitsProcessor(allowedIds, transcribeId, noTimestampsId, beginSuppress));
+    list.push(
+      new WhisperAutoLangLogitsProcessor(
+        allowedIds,
+        transcribeId,
+        noTimestampsId,
+        beginSuppress,
+        () => {
+          if (this.selectedLanguage !== "auto") {
+            return this.langTokenToId.get(this.selectedLanguage) ?? null;
+          }
+          return this.lockedAutoLangId;
+        },
+        (pickedId) => {
+          if (this.selectedLanguage !== "auto" || this.lockedAutoLangId !== null) return;
+          if (this.candidateAutoLangId === pickedId) {
+            this.candidateAutoLangStreak++;
+            if (this.candidateAutoLangStreak >= 3) {
+              this.lockedAutoLangId = pickedId;
+            }
+          } else {
+            this.candidateAutoLangId = pickedId;
+            this.candidateAutoLangStreak = 1;
+          }
+        }
+      )
+    );
     this.autoLangProcessorList = list;
   }
 
@@ -348,7 +464,7 @@ export class LocalAsrEngine {
               skip_special_tokens: true,
               callback_function: (piece: string) => {
                 streamedRaw += piece;
-                const partialClean = this.cleanHallucinatedText(streamedRaw);
+                const partialClean = cleanHallucinatedText(streamedRaw);
                 if (partialClean && partialClean !== lastPartialText) {
                   lastPartialText = partialClean;
                   onPartial({
@@ -384,7 +500,7 @@ export class LocalAsrEngine {
         text = output.text.trim();
       }
 
-      text = this.cleanHallucinatedText(text);
+      text = cleanHallucinatedText(text);
 
       this.state = "ready";
       this.isProcessing = false;
@@ -413,20 +529,5 @@ export class LocalAsrEngine {
       console.error("[ClearVoice AI] Inference error:", err);
       return null;
     }
-  }
-
-  /**
-   * Filters out common Whisper non-speech hallucinations and collapses repetitive phrase loops.
-   */
-  private cleanHallucinatedText(raw: string): string {
-    if (!raw) return "";
-    // Remove bracketed/parenthesized noise tags such as [Music], (nhạc), [Applause]
-    let cleaned = raw.replace(/\[[^\]]*\]|\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
-    if (!cleaned || /^[\p{P}\p{S}\s]+$/u.test(cleaned)) {
-      return "";
-    }
-    // Collapse consecutive 3+ repetitions of the same word/phrase (e.g. "bây giờ, bây giờ, bây giờ")
-    cleaned = cleaned.replace(/\b(\w+(?:[\s,]+\w+){0,2})(?:[\s,]+\1){2,}\b/giu, "$1");
-    return cleaned.trim();
   }
 }
