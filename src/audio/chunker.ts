@@ -2,18 +2,18 @@ import type { AudioChunk } from "../types/audio";
 
 export interface SlidingWindowConfig {
   sampleRate: number;           // e.g. 16000
-  windowDurationSec: number;    // Max chunk duration before forced valley cut (e.g. 3.2s)
-  hopDurationSec?: number;      // Unused in non-overlapping VAD mode, kept for config compatibility
-  minChunkDurationSec?: number; // Minimum speech duration before pause cut (default: 1.2s)
-  pauseDurationMs?: number;     // Natural breath/pause duration to trigger endpoint cut (default: 260ms)
-  speechThresholdRms?: number;  // RMS threshold to enter/maintain speech (default: 0.004)
+  windowDurationSec: number;    // Max chunk duration before forced valley cut (e.g. 3.0s)
+  minChunkDurationSec?: number; // Minimum speech duration before pause cut (default: 1.4s)
+  pauseDurationMs?: number;     // Natural breath/pause duration to trigger endpoint cut (default: 280ms)
+  speechThresholdRms?: number;  // Initial/floor RMS threshold to enter/maintain speech (default: 0.004)
 }
 
 /**
- * SlidingWindowChunker (Upgraded to Dynamic VAD-Pause & Minimum-Energy Valley Chunker):
- * - Eliminates fixed-clock mid-word slicing and 2-second overlap.
- * - Accumulates active speech and cuts cleanly at natural pauses (>= 260ms silence after >= 1.2s speech).
- * - If continuous speech reaches max duration (e.g. 3.2s), searches the last 0.7s for the lowest-energy
+ * SlidingWindowChunker (Dynamic Adaptive-Noise VAD-Pause & Minimum-Energy Valley Chunker):
+ * - Eliminates fixed-clock mid-word slicing and overlap.
+ * - Continuously tracks ambient noise floor so background music or quiet speakers adapt automatically.
+ * - Accumulates active speech and cuts cleanly at natural pauses (>= 280ms silence after >= 1.4s speech).
+ * - If continuous speech reaches max duration (e.g. 3.0s), searches the last 0.45s for the lowest-energy
  *   32ms valley (syllable boundary) and cuts there with 0% overlap.
  */
 export class SlidingWindowChunker {
@@ -34,6 +34,7 @@ export class SlidingWindowChunker {
   private inSpeech: boolean = false;
   private consecutiveSilentFrames: number = 0;
   private inspectedOffset: number = 0;
+  private noiseFloorRms: number;
 
   constructor(sessionId: string, config: SlidingWindowConfig) {
     this.sessionId = sessionId;
@@ -44,6 +45,7 @@ export class SlidingWindowChunker {
     const pauseMs = config.pauseDurationMs ?? 280;
     this.pauseFramesRequired = Math.max(4, Math.round(pauseMs / 32));
     this.speechThresholdRms = config.speechThresholdRms ?? 0.004;
+    this.noiseFloorRms = this.speechThresholdRms * 0.5;
     this.preRollSamples = this.frameSamples * 5; // ~160ms pre-roll
 
     this.buffer = new Float32Array(this.maxWindowSamples * 4);
@@ -73,7 +75,15 @@ export class SlidingWindowChunker {
       const rms = this.computeRms(frameStart, frameEnd);
       this.inspectedOffset = frameEnd;
 
-      if (rms >= this.speechThresholdRms) {
+      // Adaptive noise floor tracking: fast decay toward quiet frames, slow rise during sustained background noise
+      if (rms < this.noiseFloorRms) {
+        this.noiseFloorRms = 0.85 * this.noiseFloorRms + 0.15 * rms;
+      } else {
+        this.noiseFloorRms = 0.995 * this.noiseFloorRms + 0.005 * Math.min(rms, 0.04);
+      }
+      const dynamicThreshold = Math.max(this.speechThresholdRms, Math.min(0.06, this.noiseFloorRms * 2.2));
+
+      if (rms >= dynamicThreshold) {
         this.inSpeech = true;
         this.consecutiveSilentFrames = 0;
       } else if (this.inSpeech) {
@@ -98,7 +108,7 @@ export class SlidingWindowChunker {
       }
 
       // Condition 2: Continuous speech reached maxWindowSamples without a full pause
-      // Search backwards over the last 0.75s for the lowest-energy 32ms syllable boundary
+      // Search backwards over the last 0.45s for the lowest-energy 32ms syllable boundary
       if (this.inSpeech && this.inspectedOffset >= this.maxWindowSamples) {
         const cutIndex = this.findMinimumEnergyCutIndex(this.inspectedOffset);
         chunks.push(this.emitSlice(cutIndex));
@@ -181,5 +191,6 @@ export class SlidingWindowChunker {
     this.inSpeech = false;
     this.consecutiveSilentFrames = 0;
     this.inspectedOffset = 0;
+    this.noiseFloorRms = this.speechThresholdRms * 0.5;
   }
 }

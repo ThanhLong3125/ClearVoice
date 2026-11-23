@@ -42,30 +42,6 @@ export class BoundedQueue<T> {
   }
 
   /**
-   * Dequeue the oldest available item (FIFO).
-   */
-  public dequeue(): T | undefined {
-    if (this.items.length === 0) return undefined;
-    this.totalDequeued++;
-    return this.items.shift();
-  }
-
-  /**
-   * Dequeue the NEWEST item and drop any older stale items waiting in the queue.
-   * Guarantees real-time synchronization without multi-sentence lag buildup.
-   */
-  public dequeueLatest(): T | undefined {
-    if (this.items.length === 0) return undefined;
-    const latest = this.items.pop()!;
-    if (this.items.length > 0) {
-      this.droppedCount += this.items.length;
-      this.items.length = 0;
-    }
-    this.totalDequeued++;
-    return latest;
-  }
-
-  /**
    * Drain all currently queued items in chronological order and empty the queue.
    */
   public drainAll(): T[] {
@@ -77,10 +53,6 @@ export class BoundedQueue<T> {
 
   public recordDropped(count: number): void {
     this.droppedCount += count;
-  }
-
-  public peek(): T | undefined {
-    return this.items[0];
   }
 
   public get size(): number {
