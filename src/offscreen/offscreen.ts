@@ -6,30 +6,64 @@ import type { WorkerInMessage, WorkerOutMessage } from "./asr-worker";
 let currentStream: MediaStream | null = null;
 let audioContext: AudioContext | null = null;
 let currentSessionId: string | null = null;
-let analyserNode: AnalyserNode | null = null;
 let workletNode: AudioWorkletNode | null = null;
-let volumeInterval: number | null = null;
 let pipeline: AudioPipeline | null = null;
-let consumerLoopActive: boolean = false;
+let loopGeneration: number = 0;
+let chunkWakeResolver: (() => void) | null = null;
+let selectedLanguage: string = "auto";
 
 // Dedicated Web Worker for ASR so WASM never blocks the Extension UI thread
 let asrWorker: Worker | null = null;
 let workerState: "idle" | "loading" | "ready" | "error" = "idle";
 let nextRequestId = 1;
-const pendingRequests = new Map<number, (segment: TranscriptSegment | null) => void>();
+const pendingRequests = new Map<number, { resolve: (segment: TranscriptSegment | null) => void; timer: number }>();
 let lastProgressSentAt = 0;
+let workerRestartAttempts = 0;
+
+const TRANSCRIBE_TIMEOUT_MS = 12000;
+
+function flushPendingRequests(): void {
+  for (const [, entry] of pendingRequests) {
+    clearTimeout(entry.timer);
+    entry.resolve(null);
+  }
+  pendingRequests.clear();
+}
+
+function handleWorkerCrash(reason: string): void {
+  workerState = "error";
+  flushPendingRequests();
+  if (asrWorker) {
+    try {
+      asrWorker.terminate();
+    } catch {
+      // Ignore terminate errors
+    }
+    asrWorker = null;
+  }
+
+  chrome.runtime.sendMessage<ExtensionMessage>({
+    type: MessageType.MODEL_STATUS,
+    status: "error",
+    error: reason,
+  }).catch(() => {});
+
+  if (currentSessionId && workerRestartAttempts < 3) {
+    const backoffMs = 1000 * Math.pow(2, workerRestartAttempts++);
+    setTimeout(() => {
+      if (currentSessionId) {
+        ensureAsrWorker();
+      }
+    }, backoffMs);
+  }
+}
 
 function ensureAsrWorker(): void {
   if (!asrWorker) {
     asrWorker = new Worker(new URL("./asr-worker.ts", import.meta.url), { type: "module" });
     asrWorker.onerror = (err) => {
-      workerState = "error";
       console.error("[ClearVoice Offscreen] ASR Worker error:", err);
-      chrome.runtime.sendMessage<ExtensionMessage>({
-        type: MessageType.MODEL_STATUS,
-        status: "error",
-        error: err.message || "Lỗi khởi tạo ASR Worker",
-      }).catch(() => {});
+      handleWorkerCrash(err.message || "Lỗi khởi tạo ASR Worker");
     };
     asrWorker.onmessage = (event: MessageEvent<WorkerOutMessage>) => {
       const msg = event.data;
@@ -50,31 +84,33 @@ function ensureAsrWorker(): void {
         }).catch(() => {});
       } else if (msg.type === "READY") {
         workerState = "ready";
+        workerRestartAttempts = 0;
         console.log(`[ClearVoice Offscreen] ASR Worker READY on device: ${msg.device}`);
         chrome.runtime.sendMessage<ExtensionMessage>({
           type: MessageType.MODEL_STATUS,
           status: "ready",
           device: msg.device,
         }).catch(() => {});
+        if (chunkWakeResolver) {
+          const wake = chunkWakeResolver;
+          chunkWakeResolver = null;
+          wake();
+        }
       } else if (msg.type === "ERROR") {
-        workerState = "error";
-        chrome.runtime.sendMessage<ExtensionMessage>({
-          type: MessageType.MODEL_STATUS,
-          status: "error",
-          error: msg.error,
-        }).catch(() => {});
+        handleWorkerCrash(msg.error);
       } else if (msg.type === "PARTIAL") {
-        if (msg.segment && msg.segment.text) {
+        if (msg.segment && msg.segment.text && msg.segment.sessionId === currentSessionId) {
           chrome.runtime.sendMessage<ExtensionMessage>({
             type: MessageType.TRANSCRIPT_UPDATE,
             segment: msg.segment,
           }).catch(() => {});
         }
       } else if (msg.type === "RESULT") {
-        const resolver = pendingRequests.get(msg.requestId);
-        if (resolver) {
+        const entry = pendingRequests.get(msg.requestId);
+        if (entry) {
+          clearTimeout(entry.timer);
           pendingRequests.delete(msg.requestId);
-          resolver(msg.segment);
+          entry.resolve(msg.segment);
         }
       }
     };
@@ -88,7 +124,7 @@ function ensureAsrWorker(): void {
       progress: 0,
       file: "whisper-tiny",
     }).catch(() => {});
-    asrWorker.postMessage({ type: "INIT" } satisfies WorkerInMessage);
+    asrWorker.postMessage({ type: "INIT", language: selectedLanguage } satisfies WorkerInMessage);
   }
 }
 
@@ -99,7 +135,15 @@ function transcribeInWorker(chunk: AudioChunk): Promise<TranscriptSegment | null
       return;
     }
     const requestId = nextRequestId++;
-    pendingRequests.set(requestId, resolve);
+    const timer = window.setTimeout(() => {
+      if (pendingRequests.has(requestId)) {
+        pendingRequests.delete(requestId);
+        console.warn(`[ClearVoice Offscreen] ASR request #${requestId} timed out after ${TRANSCRIBE_TIMEOUT_MS}ms`);
+        resolve(null);
+      }
+    }, TRANSCRIBE_TIMEOUT_MS);
+
+    pendingRequests.set(requestId, { resolve, timer });
     asrWorker.postMessage({
       type: "TRANSCRIBE",
       requestId,
@@ -110,19 +154,25 @@ function transcribeInWorker(chunk: AudioChunk): Promise<TranscriptSegment | null
 
 /**
  * Dedicated Consumer Loop: Pulls audio chunks from bounded queue and dispatches them to the ASR Web Worker.
+ * Uses generation token and event wakeup so stop/start cycles never spawn duplicate loops or leak stale segments.
  */
 async function runAsrConsumerLoop(): Promise<void> {
-  if (consumerLoopActive) return;
-  consumerLoopActive = true;
-  console.log("[ClearVoice Offscreen] ASR Consumer Loop started.");
+  const myGen = ++loopGeneration;
+  const mySessionId = currentSessionId;
+  console.log(`[ClearVoice Offscreen] ASR Consumer Loop #${myGen} started for session ${mySessionId}.`);
 
-  while (consumerLoopActive) {
+  while (myGen === loopGeneration) {
     if (workerState === "ready" && pipeline) {
       const chunk = pipeline.nextChunk();
       if (chunk) {
         try {
           const segment = await transcribeInWorker(chunk);
-          if (segment && segment.text) {
+          if (
+            myGen === loopGeneration &&
+            segment &&
+            segment.text &&
+            segment.sessionId === currentSessionId
+          ) {
             console.log(`[ClearVoice ASR] Subtitle emitted: "${segment.text}"`);
             chrome.runtime.sendMessage<ExtensionMessage>({
               type: MessageType.TRANSCRIPT_UPDATE,
@@ -135,27 +185,45 @@ async function runAsrConsumerLoop(): Promise<void> {
         continue;
       }
     }
-    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    await new Promise<void>((resolve) => {
+      const fallbackTimer = window.setTimeout(() => {
+        if (chunkWakeResolver === wake) {
+          chunkWakeResolver = null;
+        }
+        resolve();
+      }, 200);
+      const wake = () => {
+        clearTimeout(fallbackTimer);
+        resolve();
+      };
+      chunkWakeResolver = wake;
+    });
   }
-  console.log("[ClearVoice Offscreen] ASR Consumer Loop stopped.");
+  console.log(`[ClearVoice Offscreen] ASR Consumer Loop #${myGen} stopped.`);
 }
 
 /**
  * Start capturing audio from tab MediaStream ID.
  */
-async function handleInitAudioCapture(streamId: string, sessionId: string): Promise<void> {
+async function handleInitAudioCapture(streamId: string, sessionId: string, language?: string): Promise<void> {
+  // Release any previous session resources first
+  if (currentStream || audioContext) {
+    stopAudioCapture(false);
+  }
+
+  currentSessionId = sessionId;
+  if (language) {
+    selectedLanguage = language;
+  }
+
+  // Immediately start warming up the Local AI ASR Engine in background Web Worker
+  ensureAsrWorker();
+  if (asrWorker && language) {
+    asrWorker.postMessage({ type: "SET_LANGUAGE", language } satisfies WorkerInMessage);
+  }
+
   try {
-    // Release any previous session resources first
-    if (currentStream || audioContext) {
-      stopAudioCapture();
-    }
-
-    currentSessionId = sessionId;
-
-    // Immediately start warming up the Local AI ASR Engine in background Web Worker
-    // BEFORE waiting on getUserMedia or AudioWorklet so model loading never gets blocked
-    ensureAsrWorker();
-
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         mandatory: {
@@ -171,13 +239,12 @@ async function handleInitAudioCapture(streamId: string, sessionId: string): Prom
     stream.getAudioTracks().forEach((track) => {
       track.onended = () => {
         console.warn("[ClearVoice Offscreen] Audio track ended unexpectedly.");
-        stopAudioCapture();
+        stopAudioCapture(true);
       };
     });
 
     audioContext = new AudioContext();
     if (audioContext.state === "suspended") {
-      console.log("[ClearVoice Offscreen] AudioContext suspended, resuming...");
       await audioContext.resume();
     }
     const sourceNode = audioContext.createMediaStreamSource(stream);
@@ -185,64 +252,15 @@ async function handleInitAudioCapture(streamId: string, sessionId: string): Prom
     // 1. Passthrough so user hears tab audio normally
     sourceNode.connect(audioContext.destination);
 
-    // 2. Real-time volume & pipeline stats (throttled to 250ms to keep IPC & Popup responsive)
-    analyserNode = audioContext.createAnalyser();
-    analyserNode.fftSize = 256;
-    sourceNode.connect(analyserNode);
-
-    const buffer = new Float32Array(analyserNode.fftSize);
-
-    volumeInterval = window.setInterval(async () => {
-      if (!analyserNode || !audioContext) return;
-      if (audioContext.state === "suspended") {
-        try {
-          await audioContext.resume();
-        } catch {
-          // Ignore resume error
-        }
-      }
-      analyserNode.getFloatTimeDomainData(buffer);
-
-      let sum = 0;
-      for (let i = 0; i < buffer.length; i++) {
-        sum += buffer[i] * buffer[i];
-      }
-      const rms = Math.sqrt(sum / buffer.length);
-      const volume = Math.min(100, Math.round(rms * 250));
-
-      chrome.runtime.sendMessage<ExtensionMessage>({
-        type: MessageType.AUDIO_VOLUME,
-        volume,
-        rms: Number(rms.toFixed(4)),
-      }).catch(() => {});
-
-      if (pipeline) {
-        const stats = pipeline.getStats();
-        chrome.runtime.sendMessage<ExtensionMessage>({
-          type: MessageType.PIPELINE_METRICS,
-          totalChunks: stats.totalEmittedChunks,
-          durationSec: Number((stats.totalEmittedChunks * 2.5).toFixed(1)),
-          queueDepth: stats.queueMetrics.currentDepth,
-          queueCapacity: stats.queueMetrics.maxCapacity,
-          isSpeechActive: stats.isSpeechActive,
-          silenceChunksFiltered: stats.silenceChunksFiltered,
-        }).catch(() => {});
-      }
-    }, 250);
-
-    // 3. Initialize AudioWorklet & Audio Processing Pipeline
+    // 2. Initialize AudioWorklet & Audio Processing Pipeline
     const workletUrl = chrome.runtime.getURL("audio-processor.js");
     await audioContext.audioWorklet.addModule(workletUrl);
     workletNode = new AudioWorkletNode(audioContext, "audio-stream-processor");
-
-    // 4. Warm up Local AI ASR Engine in background Web Worker
-    ensureAsrWorker();
 
     pipeline = new AudioPipeline(sessionId, {
       sourceSampleRate: audioContext.sampleRate,
       targetSampleRate: 16000,
       windowDurationSec: 3.0,
-      hopDurationSec: 3.0,
       minChunkDurationSec: 1.4,
       pauseDurationMs: 280,
       maxQueueCapacity: 4,
@@ -250,10 +268,15 @@ async function handleInitAudioCapture(streamId: string, sessionId: string): Prom
         console.log(
           `[ClearVoice Pipeline] Phrase Chunk #${chunk.sequence} | Duration: ${(chunk.samples.length / 16000).toFixed(2)}s | Timeline: ${(chunk.startSample / 16000).toFixed(2)}s`
         );
+        if (chunkWakeResolver) {
+          const wake = chunkWakeResolver;
+          chunkWakeResolver = null;
+          wake();
+        }
       },
     });
 
-    runAsrConsumerLoop();
+    void runAsrConsumerLoop();
 
     workletNode.port.onmessage = (event: MessageEvent<{ channels: Float32Array[] }>) => {
       if (pipeline && event.data && event.data.channels) {
@@ -267,24 +290,24 @@ async function handleInitAudioCapture(streamId: string, sessionId: string): Prom
       `[ClearVoice Offscreen] Audio capture & pipeline active. Source: ${audioContext.sampleRate}Hz, Target: 16000Hz mono. Session: ${sessionId}`
     );
   } catch (err) {
-    console.error("[ClearVoice Offscreen] Failed to start audio capture:", err);
-    chrome.runtime.sendMessage<ExtensionMessage>({
-      type: MessageType.STATUS_UPDATE,
-      state: "error",
-      error: err instanceof Error ? err.message : String(err),
-    }).catch(() => {});
+    stopAudioCapture(false);
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[ClearVoice Offscreen] Failed to start audio capture:", message);
+    throw new Error(message);
   }
 }
 
 /**
  * Stop capturing audio, release tracks, and close AudioContext.
  */
-function stopAudioCapture(): void {
-  consumerLoopActive = false;
-  if (volumeInterval) {
-    clearInterval(volumeInterval);
-    volumeInterval = null;
+function stopAudioCapture(notifyIdle: boolean = false): void {
+  loopGeneration++;
+  if (chunkWakeResolver) {
+    const wake = chunkWakeResolver;
+    chunkWakeResolver = null;
+    wake();
   }
+  flushPendingRequests();
 
   if (pipeline) {
     console.log("[ClearVoice Offscreen] Final pipeline stats:", pipeline.getStats());
@@ -298,45 +321,54 @@ function stopAudioCapture(): void {
     workletNode = null;
   }
 
-  if (analyserNode) {
-    analyserNode.disconnect();
-    analyserNode = null;
-  }
-
   if (currentStream) {
-    currentStream.getTracks().forEach((track) => track.stop());
+    currentStream.getTracks().forEach((track) => {
+      track.onended = null;
+      track.stop();
+    });
     currentStream = null;
   }
 
   if (audioContext && audioContext.state !== "closed") {
-    audioContext.close();
+    void audioContext.close();
     audioContext = null;
   }
 
-  chrome.runtime.sendMessage<ExtensionMessage>({
-    type: MessageType.AUDIO_VOLUME,
-    volume: 0,
-    rms: 0,
-  }).catch(() => {});
-
-  console.log(`[ClearVoice Offscreen] Audio resources released for session: ${currentSessionId ?? "none"}`);
+  const endedSession = currentSessionId;
   currentSessionId = null;
-}
+  console.log(`[ClearVoice Offscreen] Audio resources released for session: ${endedSession ?? "none"}`);
 
-// Start warming up the ASR Web Worker as soon as the offscreen document loads
-ensureAsrWorker();
+  if (notifyIdle && endedSession) {
+    chrome.runtime.sendMessage<ExtensionMessage>({
+      type: MessageType.STATUS_UPDATE,
+      state: "idle",
+    }).catch(() => {});
+  }
+}
 
 // Listen for commands from Service Worker
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
   switch (message.type) {
     case MessageType.INIT_AUDIO_CAPTURE:
-      handleInitAudioCapture(message.streamId, message.sessionId);
-      sendResponse({ ok: true });
-      break;
+      handleInitAudioCapture(message.streamId, message.sessionId, message.language)
+        .then(() => sendResponse({ ok: true }))
+        .catch((err: unknown) =>
+          sendResponse({ ok: false, error: err instanceof Error ? err.message : String(err) })
+        );
+      return true;
 
     case MessageType.STOP_AUDIO_CAPTURE:
-      stopAudioCapture();
+      stopAudioCapture(false);
       sendResponse({ ok: true });
-      break;
+      return false;
+
+    case MessageType.SET_LANGUAGE:
+      selectedLanguage = message.language;
+      if (asrWorker) {
+        asrWorker.postMessage({ type: "SET_LANGUAGE", language: message.language } satisfies WorkerInMessage);
+      }
+      sendResponse({ ok: true });
+      return false;
   }
+  return false;
 });

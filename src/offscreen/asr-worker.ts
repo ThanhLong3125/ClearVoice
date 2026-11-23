@@ -2,7 +2,8 @@ import { LocalAsrEngine, type AsrProgress } from "../ai/asr-engine";
 import type { AudioChunk, TranscriptSegment } from "../types/audio";
 
 export type WorkerInMessage =
-  | { type: "INIT" }
+  | { type: "INIT"; language?: string }
+  | { type: "SET_LANGUAGE"; language: string }
   | { type: "TRANSCRIBE"; requestId: number; chunk: AudioChunk };
 
 export type WorkerOutMessage =
@@ -18,7 +19,15 @@ self.onmessage = async (event: MessageEvent<WorkerInMessage>) => {
   const msg = event.data;
   if (!msg) return;
 
+  if (msg.type === "SET_LANGUAGE") {
+    engine.setLanguage(msg.language);
+    return;
+  }
+
   if (msg.type === "INIT") {
+    if (msg.language) {
+      engine.setLanguage(msg.language);
+    }
     if (engine.isReady()) {
       self.postMessage({ type: "READY", device: engine.getDevice() } satisfies WorkerOutMessage);
       return;

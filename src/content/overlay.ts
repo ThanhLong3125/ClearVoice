@@ -1,15 +1,44 @@
 import type { ExtensionMessage } from "../types/messages";
-import "./overlay.css";
+import overlayStyles from "./overlay.css?inline";
 
+let shadowHost: HTMLDivElement | null = null;
 let overlayContainer: HTMLDivElement | null = null;
 let subtitleBox: HTMLDivElement | null = null;
 let prevLineBox: HTMLDivElement | null = null;
 let currLineBox: HTMLDivElement | null = null;
 let hideTimer: number | null = null;
 let lastFinalText: string = "";
+let activeSessionId: string | null = null;
+
+function resolveOverlayMountTarget(): HTMLElement {
+  const fs = document.fullscreenElement as HTMLElement | null;
+  if (fs && fs.tagName !== "VIDEO" && fs.tagName !== "IFRAME") {
+    return fs;
+  }
+  return document.body;
+}
+
+function syncOverlayParent(): void {
+  if (!shadowHost) return;
+  const target = resolveOverlayMountTarget();
+  if (shadowHost.parentElement !== target) {
+    target.appendChild(shadowHost);
+  }
+}
 
 function ensureOverlayDOM(): void {
-  if (overlayContainer) return;
+  if (overlayContainer && shadowHost) {
+    syncOverlayParent();
+    return;
+  }
+
+  shadowHost = document.createElement("div");
+  shadowHost.id = "clearvoice-shadow-host";
+  const shadowRoot = shadowHost.attachShadow({ mode: "closed" });
+
+  const styleEl = document.createElement("style");
+  styleEl.textContent = overlayStyles;
+  shadowRoot.appendChild(styleEl);
 
   overlayContainer = document.createElement("div");
   overlayContainer.className = "clearvoice-overlay-container";
@@ -28,13 +57,22 @@ function ensureOverlayDOM(): void {
   subtitleBox.appendChild(prevLineBox);
   subtitleBox.appendChild(currLineBox);
   overlayContainer.appendChild(subtitleBox);
+  shadowRoot.appendChild(overlayContainer);
 
-  document.body.appendChild(overlayContainer);
+  syncOverlayParent();
+  document.addEventListener("fullscreenchange", syncOverlayParent);
 }
 
-function displaySubtitle(text: string, status: "partial" | "final" | "uncertain"): void {
+function displaySubtitle(sessionId: string, text: string, status: "partial" | "final" | "uncertain"): void {
   ensureOverlayDOM();
   if (!overlayContainer || !currLineBox || !prevLineBox) return;
+
+  if (activeSessionId !== sessionId) {
+    activeSessionId = sessionId;
+    lastFinalText = "";
+    prevLineBox.textContent = "";
+    prevLineBox.style.display = "none";
+  }
 
   const clean = text.trim();
   if (!clean) return;
@@ -64,16 +102,18 @@ function displaySubtitle(text: string, status: "partial" | "final" | "uncertain"
   }
 }
 
-// Prevent duplicate listeners if content script is injected both declaratively and programmatically
+// Prevent duplicate listeners if content script is injected multiple times
 const globalOverlayState = window as unknown as { __clearVoiceOverlayLoaded?: boolean };
 if (!globalOverlayState.__clearVoiceOverlayLoaded) {
   globalOverlayState.__clearVoiceOverlayLoaded = true;
 
   chrome.runtime.onMessage.addListener((message: ExtensionMessage) => {
     if (message.type === "TRANSCRIPT_UPDATE") {
-      displaySubtitle(message.segment.text, message.segment.status);
+      displaySubtitle(message.segment.sessionId, message.segment.text, message.segment.status);
     } else if (message.type === "STATUS_UPDATE") {
       if (message.state === "idle" || message.state === "error") {
+        activeSessionId = null;
+        lastFinalText = "";
         if (overlayContainer) {
           overlayContainer.style.display = "none";
         }
