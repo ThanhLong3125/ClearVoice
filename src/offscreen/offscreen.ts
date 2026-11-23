@@ -50,6 +50,7 @@ function ensureAsrWorker(): void {
         }).catch(() => {});
       } else if (msg.type === "READY") {
         workerState = "ready";
+        console.log(`[ClearVoice Offscreen] ASR Worker READY on device: ${msg.device}`);
         chrome.runtime.sendMessage<ExtensionMessage>({
           type: MessageType.MODEL_STATUS,
           status: "ready",

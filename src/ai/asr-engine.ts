@@ -124,6 +124,19 @@ class WhisperAutoLangLogitsProcessor extends LogitsProcessor {
   }
 }
 
+async function checkWebGpuSupport(): Promise<boolean> {
+  try {
+    const nav = typeof navigator !== "undefined" ? (navigator as unknown as { gpu?: { requestAdapter?: () => Promise<unknown> } }) : null;
+    if (!nav?.gpu?.requestAdapter) {
+      return false;
+    }
+    const adapter = await nav.gpu.requestAdapter();
+    return adapter !== null && adapter !== undefined;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * LocalAsrEngine: Manages on-device Whisper model lifecycle and inference using Transformers.js / ONNX Runtime Web.
  */
@@ -156,6 +169,7 @@ export class LocalAsrEngine {
 
   /**
    * Initialize and load the Whisper model into browser/worker memory.
+   * Employs an Adaptive Multi-Backend strategy: WebGPU (hardware-accelerated) -> WASM SIMD (universal fallback).
    */
   public async initialize(onProgress?: (info: AsrProgress) => void): Promise<void> {
     if (this.initPromise) {
@@ -179,6 +193,38 @@ export class LocalAsrEngine {
         }
       };
 
+      // 1. Attempt WebGPU first for maximum speed and energy efficiency
+      const isGpuSupported = await checkWebGpuSupport();
+      if (isGpuSupported) {
+        try {
+          console.log("[ClearVoice AI] WebGPU hardware detected. Attempting WebGPU Q4 pipeline...");
+          this.transcriber = (await pipeline(
+            "automatic-speech-recognition",
+            "onnx-community/whisper-tiny",
+            {
+              device: "webgpu",
+              dtype: "q4",
+              progress_callback: progressCallback,
+            }
+          )) as AutomaticSpeechRecognitionPipeline;
+
+          this.prepareAutoLanguageDetector();
+          this.activeDevice = "webgpu";
+          this.state = "ready";
+          console.log("[ClearVoice AI] Whisper Q4 Model successfully initialized on WebGPU (⚡ Hardware Accelerated)!");
+          return;
+        } catch (webGpuError) {
+          console.warn(
+            "[ClearVoice AI] WebGPU initialization failed, seamlessly falling back to WASM SIMD:",
+            webGpuError
+          );
+          this.transcriber = null;
+        }
+      } else {
+        console.log("[ClearVoice AI] WebGPU not available in current environment. Using WASM SIMD.");
+      }
+
+      // 2. Seamless Fallback: WASM SIMD Q4 (~96MB)
       console.log("[ClearVoice AI] Initializing whisper-tiny via WASM Q4 (~96MB)...");
       try {
         this.transcriber = (await pipeline(
@@ -194,7 +240,7 @@ export class LocalAsrEngine {
         this.prepareAutoLanguageDetector();
         this.activeDevice = "wasm";
         this.state = "ready";
-        console.log("[ClearVoice AI] Whisper Q4 Model successfully initialized with Auto-Language Detection!");
+        console.log("[ClearVoice AI] Whisper Q4 Model successfully initialized with WASM SIMD!");
       } catch (wasmError) {
         this.initPromise = null; // Allow retry on failure
         this.state = "error";

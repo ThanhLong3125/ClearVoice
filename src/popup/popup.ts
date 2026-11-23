@@ -110,7 +110,12 @@ function updateModelUI(modelStatus?: {
       statModel.style.color = "#38bdf8";
     }
   } else if (modelStatus.status === "ready") {
-    statModel.textContent = `Sẵn sàng (${modelStatus.device?.toUpperCase() ?? "WASM"})`;
+    const dev = (modelStatus.device ?? "wasm").toLowerCase();
+    if (dev.includes("webgpu")) {
+      statModel.textContent = "Sẵn sàng (WEBGPU ⚡)";
+    } else {
+      statModel.textContent = "Sẵn sàng (WASM SIMD)";
+    }
     statModel.style.color = "#10b981";
   } else if (modelStatus.status === "error") {
     statModel.textContent = "Lỗi nạp AI (Xem log)";

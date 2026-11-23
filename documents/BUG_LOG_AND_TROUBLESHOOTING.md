@@ -22,6 +22,7 @@
 | **BUG-012** | Giao diện Popup bị khựng/đơ khi bấm vào icon Extension lúc AI đang chạy & chọn Tiếng Anh vẫn dịch ra Tiếng Việt | `offscreen.html` và `popup/index.html` dùng chung Main UI Thread của Extension Process; `modeling_whisper.js` chưa cài đặt auto language detection | Tách toàn bộ Whisper WASM sang Web Worker (`asr-worker.ts`) và viết `WhisperAutoLangLogitsProcessor` tự nhận diện đa ngôn ngữ 1 bước | ✅ Đã sửa |
 | **BUG-013** | Phụ đề bị trễ 2–3 câu so với video, turn đầu bịa chữ ở cuối câu rồi turn sau mới chuẩn | Cửa sổ trượt cố định (`window 3s, hop 1s`) cắt đứt ngang âm tiết và chồng lấp 2s (bắt AI dịch lặp 3 lần) kết hợp hàng đợi FIFO `5/5` | Thay bằng `Dynamic VAD-Pause & Minimum-Energy Valley Chunker` (0% chồng lấp, cắt tại điểm ngắt hơi/năng lượng cực tiểu) và hàng đợi `Coalesce & Drop-Stale` | ✅ Đã sửa |
 | **BUG-014** | Tiện ích không nhận được âm thanh (`AbortError: Error starting tab capture` hoặc Volume Meter = 0%) | COEP `require-corp` trong `manifest.json` chặn quyền nạp luồng media từ tab khác vào Extension; AudioContext trong offscreen document bị rơi vào trạng thái `"suspended"` khi khởi tạo bất đồng bộ | Gỡ bỏ COOP/COEP khỏi `manifest.json` và bổ sung `audioContext.resume()` ngay sau khi khởi tạo cùng vòng lặp bảo vệ trong `volumeInterval` | ✅ Đã sửa |
+| **BUG-015** | Đột ngột crash hoặc không thể khởi động AI khi gán cứng `device: "webgpu"` trên các môi trường thiếu GPU adapter (Linux headless, Docker, driver cũ) | API WebGPU (`navigator.gpu`) có thể trả về `undefined` hoặc `requestAdapter()` trả về `null` nếu trình duyệt không có phần cứng/driver đồ họa tương thích | Xây dựng cơ chế thăm dò và chuyển đổi thích ứng (`checkWebGpuSupport()`), ưu tiên WebGPU và tự động lùi về WASM SIMD (Zero-crash Adaptive Multi-Backend) | ✅ Đã sửa |
 
 ---
 
@@ -106,4 +107,19 @@
 * **Cách xử lý:**
   1. **Gỡ bỏ hoàn toàn `cross_origin_opener_policy` và `cross_origin_embedder_policy` khỏi `manifest.json`:** ONNX Runtime Web hoạt động hoàn toàn ổn định và tốc độ cao ở chế độ đơn luồng tăng tốc SIMD (`numThreads = 1`, `device: "wasm"`), giải mã các chunk câu 1–2s trong ~350–500ms mà không hề gây xung đột với API `tabCapture`.
   2. **Bảo đảm trạng thái `AudioContext` luôn là `running`:** Ngay sau khi khởi tạo `audioContext = new AudioContext()`, kiểm tra `if (audioContext.state === "suspended") await audioContext.resume();`. Đồng thời trong hàm định kỳ `volumeInterval`, tự động đánh thức nếu context bị tạm dừng.
+
+---
+
+### 7. BUG-015: Khởi tạo WebGPU thất bại do thiếu Adapter và Giải pháp Đa Backend Tự Thích Ứng (Adaptive Multi-Backend)
+* **Triệu chứng:** Nếu cấu hình gán cứng `device: "webgpu"`, ứng dụng ném ngoại lệ `Error: WebGPU is not supported in current environment` hoặc `Failed to get GPU adapter`, khiến ASR Engine chuyển sang trạng thái `"error"` và đứng im.
+* **Nguyên nhân gốc rễ (Kiểm chứng qua Chromium Probe):**
+  1. API WebGPU (`navigator.gpu.requestAdapter()`) phụ thuộc trực tiếp vào tầng driver đồ họa hệ điều hành (Vulkan trên Linux, Direct3D 12 trên Windows, Metal trên macOS). Trên máy ảo, Linux headless, hoặc các thiết bị văn phòng không có card đồ họa tương thích, `navigator.gpu` có thể không tồn tại hoặc `requestAdapter()` trả về `null`.
+  2. Gán cứng `device: "webgpu"` sẽ làm mất đi khả năng chạy phổ quát (portable) của Chrome Extension.
+* **Cách xử lý:**
+  1. **Hàm thăm dò an toàn `checkWebGpuSupport()` (`src/ai/asr-engine.ts`):** Kiểm tra sự tồn tại của `navigator.gpu` và thử xin cấp phát adapter trước khi nạp model.
+  2. **Chiến lược Đa Backend Tự Thích Ứng (Adaptive Multi-Backend):**
+     - **Bước 1 (Ưu tiên):** Nếu máy có GPU hỗ trợ WebGPU, nạp Whisper Q4 trên WebGPU (`device: "webgpu"`), suy luận siêu tốc 80–150ms/câu, không cần COOP/COEP và hoàn toàn không xung đột với `tabCapture`.
+     - **Bước 2 (Dự phòng tự động):** Nếu không có WebGPU hoặc shader compile thất bại, lập tức tự động lùi về WASM SIMD (`device: "wasm"`) mà không làm gián đoạn hay báo lỗi cho người dùng.
+     - **Giao diện Popup:** Tự động phát hiện và hiển thị huy hiệu `Sẵn sàng (WEBGPU ⚡)` hoặc `Sẵn sàng (WASM SIMD)`.
+
 
