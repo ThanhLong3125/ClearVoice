@@ -4,19 +4,13 @@ const btnStart = document.getElementById("btnStart") as HTMLButtonElement;
 const btnStop = document.getElementById("btnStop") as HTMLButtonElement;
 const statusDot = document.getElementById("statusDot") as HTMLDivElement;
 const statusText = document.getElementById("statusText") as HTMLSpanElement;
+const statusSubtext = document.getElementById("statusSubtext") as HTMLDivElement;
 const errorMsg = document.getElementById("errorMsg") as HTMLDivElement;
-const volumeContainer = document.getElementById("volumeContainer") as HTMLDivElement;
-const volumeBar = document.getElementById("volumeBar") as HTMLDivElement;
-const volumePercent = document.getElementById("volumePercent") as HTMLSpanElement;
 
-const pipelineStats = document.getElementById("pipelineStats") as HTMLDivElement;
-const statModel = document.getElementById("statModel") as HTMLElement;
-const statVad = document.getElementById("statVad") as HTMLElement;
-const statQueue = document.getElementById("statQueue") as HTMLElement;
-const subtitleCard = document.getElementById("subtitleCard") as HTMLDivElement;
-const popupSubtitle = document.getElementById("popupSubtitle") as HTMLDivElement;
+let currentCaptureState: CaptureState = "idle";
 
 function updateUI(state: CaptureState, error?: string): void {
+  currentCaptureState = state;
   statusDot.className = `status-dot ${state}`;
   errorMsg.style.display = error ? "block" : "none";
   if (error) {
@@ -26,97 +20,37 @@ function updateUI(state: CaptureState, error?: string): void {
   switch (state) {
     case "idle":
       statusText.textContent = "Trạng thái: Sẵn sàng";
+      statusSubtext.style.display = "none";
       btnStart.disabled = false;
       btnStop.disabled = true;
-      volumeContainer.style.display = "none";
-      if (pipelineStats) pipelineStats.style.display = "none";
-      if (subtitleCard) subtitleCard.style.display = "none";
-      updateVolume(0);
-      resetStats();
       break;
     case "starting":
-      statusText.textContent = "Đang khởi tạo capture...";
+      statusText.textContent = "Đang khởi tạo...";
+      statusSubtext.style.display = "block";
+      statusSubtext.textContent = "Chuẩn bị thu âm và mô hình AI...";
       btnStart.disabled = true;
       btnStop.disabled = true;
-      volumeContainer.style.display = "block";
-      if (pipelineStats) pipelineStats.style.display = "block";
-      if (subtitleCard) subtitleCard.style.display = "block";
       break;
     case "capturing":
       statusText.textContent = "Đang thu âm tab";
+      statusSubtext.style.display = "block";
+      statusSubtext.textContent = "Phụ đề đang hiển thị trực tiếp trên video";
       btnStart.disabled = true;
       btnStop.disabled = false;
-      volumeContainer.style.display = "block";
-      if (pipelineStats) pipelineStats.style.display = "block";
-      if (subtitleCard) subtitleCard.style.display = "block";
       break;
     case "stopping":
       statusText.textContent = "Đang dừng...";
+      statusSubtext.style.display = "none";
       btnStart.disabled = true;
       btnStop.disabled = true;
-      volumeContainer.style.display = "none";
-      if (pipelineStats) pipelineStats.style.display = "none";
-      if (subtitleCard) subtitleCard.style.display = "none";
-      updateVolume(0);
       break;
     case "error":
       statusText.textContent = "Lỗi capture";
+      statusSubtext.style.display = "none";
       btnStart.disabled = false;
       btnStop.disabled = true;
-      volumeContainer.style.display = "none";
-      if (pipelineStats) pipelineStats.style.display = "none";
-      if (subtitleCard) subtitleCard.style.display = "none";
-      updateVolume(0);
       break;
   }
-}
-
-function updateVolume(percent: number): void {
-  if (volumeBar && volumePercent) {
-    volumeBar.style.width = `${percent}%`;
-    volumePercent.textContent = `${percent}%`;
-  }
-}
-
-let lastPopupFinalText = "";
-
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
-function updatePopupSubtitle(text: string, status?: "partial" | "final" | "uncertain"): void {
-  if (!popupSubtitle) return;
-  const clean = text.trim();
-  if (!clean) return;
-
-  if (lastPopupFinalText && lastPopupFinalText !== clean) {
-    popupSubtitle.innerHTML = `<div style="font-size: 0.78rem; color: #94a3b8; margin-bottom: 4px; line-height: 1.3;">${escapeHtml(lastPopupFinalText)}</div><div style="font-size: 0.95rem; color: #f8fafc; font-weight: 500; line-height: 1.35;">${escapeHtml(clean)}</div>`;
-  } else {
-    popupSubtitle.innerHTML = `<div style="font-size: 0.95rem; color: #f8fafc; font-weight: 500; line-height: 1.35;">${escapeHtml(clean)}</div>`;
-  }
-
-  if (status === "final") {
-    lastPopupFinalText = clean;
-  }
-}
-
-function resetStats(): void {
-  lastPopupFinalText = "";
-  if (statModel) {
-    statModel.textContent = "Đang kết nối...";
-    statModel.style.color = "#38bdf8";
-  }
-  if (statVad) {
-    statVad.textContent = "Chờ âm thanh...";
-    statVad.style.color = "#94a3b8";
-  }
-  if (statQueue) statQueue.textContent = "0/5 (0 chunks)";
-  if (popupSubtitle) popupSubtitle.textContent = "Đang lắng nghe...";
 }
 
 function updateModelUI(modelStatus?: {
@@ -126,32 +60,23 @@ function updateModelUI(modelStatus?: {
   device?: string;
   error?: string;
 }): void {
-  if (!statModel || !modelStatus) return;
+  if (!modelStatus || currentCaptureState !== "starting") return;
+
   if (modelStatus.status === "loading") {
     const rawFile = modelStatus.file?.split("/").pop()?.replace(".onnx", "").replace("_model", "") ?? "AI";
     const percent = modelStatus.progress ?? 0;
+    statusSubtext.style.display = "block";
     if (percent === 100 && (rawFile.includes("decoder") || rawFile.includes("q4"))) {
-      statModel.textContent = "Đang nạp bộ nhớ...";
-      statModel.style.color = "#38bdf8";
+      statusSubtext.textContent = "Đang nạp bộ nhớ AI...";
     } else {
-      statModel.textContent = `Tải ${rawFile} (${percent}%)`;
-      statModel.style.color = "#38bdf8";
+      statusSubtext.textContent = `Đang tải mô hình ${rawFile} (${percent}%)...`;
     }
   } else if (modelStatus.status === "ready") {
-    const dev = (modelStatus.device ?? "wasm").toLowerCase();
-    if (dev.includes("webgpu")) {
-      statModel.textContent = "Sẵn sàng (WEBGPU ⚡)";
-    } else {
-      statModel.textContent = "Sẵn sàng (WASM SIMD)";
-    }
-    statModel.style.color = "#10b981";
+    statusSubtext.style.display = "block";
+    statusSubtext.textContent = "Mô hình AI đã sẵn sàng";
   } else if (modelStatus.status === "error") {
-    statModel.textContent = "Lỗi nạp AI (Xem log)";
-    statModel.title = modelStatus.error ?? "";
-    statModel.style.color = "#ef4444";
-  } else if (modelStatus.status === "idle") {
-    statModel.textContent = "Chờ khởi tạo...";
-    statModel.style.color = "#94a3b8";
+    statusSubtext.style.display = "block";
+    statusSubtext.textContent = "Lỗi khi tải AI";
   }
 }
 
@@ -167,37 +92,15 @@ chrome.runtime.sendMessage<ExtensionMessage>({ type: MessageType.GET_STATUS }, (
     if (response.modelStatus) {
       updateModelUI(response.modelStatus);
     }
-    if (response.lastTranscript && popupSubtitle) {
-      popupSubtitle.textContent = response.lastTranscript;
-    }
   }
 });
 
-// Listen for status updates and volume from background
+// Listen for status updates
 chrome.runtime.onMessage.addListener((message: ExtensionMessage) => {
   if (message.type === MessageType.STATUS_UPDATE) {
     updateUI(message.state, message.error);
-  } else if (message.type === MessageType.AUDIO_VOLUME) {
-    updateVolume(message.volume);
   } else if (message.type === MessageType.MODEL_STATUS) {
     updateModelUI(message);
-  } else if (message.type === MessageType.TRANSCRIPT_UPDATE) {
-    if (message.segment?.text) {
-      updatePopupSubtitle(message.segment.text, message.segment.status);
-    }
-  } else if (message.type === MessageType.PIPELINE_METRICS) {
-    if (statVad) {
-      if (message.isSpeechActive) {
-        statVad.textContent = "Đang có tiếng nói";
-        statVad.style.color = "#10b981";
-      } else {
-        statVad.textContent = "Im lặng (Đã lọc)";
-        statVad.style.color = "#94a3b8";
-      }
-    }
-    if (statQueue) {
-      statQueue.textContent = `${message.queueDepth}/${message.queueCapacity} (${message.totalChunks} chunks)`;
-    }
   }
 });
 

@@ -6,18 +6,20 @@ Tất cả các thay đổi đáng chú ý của dự án **ClearVoice** sẽ đ
 
 ---
 
-## [Unreleased]
+## [0.3.0] - 2026-11-23
 ### Added
+- **Tối ưu hóa UI Trải nghiệm Người dùng (Minimalist One-Click Subtitle UI):**
+  - Loại bỏ hoàn toàn thanh thông báo âm lượng nổi `ClearVoice Audio` ở góc phải tab trang web (`overlay.ts` & `overlay.css`), trả lại toàn bộ không gian thao tác trên tab và video của người dùng mà không bị che khuất.
+  - Tinh giản giao diện Extension Popup: Gỡ bỏ các thành phần hiển thị thông số kiểm thử nội bộ (thanh sóng âm lượng, trạng thái nhận diện tiếng nói VAD, thông số hàng đợi Queue, và khung xem trước phụ đề trùng lặp trong popup).
+  - Tối ưu luồng trải nghiệm: Chỉ hiển thị trạng thái súc tích (*Sẵn sàng*, *Đang thu âm tab*, tiến trình tải model nếu có) và nút điều khiển một chạm, phụ đề xuất hiện trực tiếp và duy nhất trên khung hiển thị của tab.
 - **Cửa sổ Phụ đề Cuộn 2 Dòng (Rolling 2-Line Subtitle Window) chống nhảy chữ:**
   - Thiết kế hiển thị 2 dòng phụ đề đồng thời: Dòng trên lưu giữ câu vừa hoàn thành trước đó (màu xám dịu) trong 6 giây để người dùng kịp đọc trọn vẹn; Dòng dưới nhả chữ trực tiếp (`partial`) theo thời gian thực cho câu đang nói.
-  - Áp dụng đồng bộ trên cả Khung phụ đề nổi trên trang (`overlay.ts`) và Khung Live ASR trong Popup (`popup.ts`).
 - **Tối ưu hóa Cân bằng Giữa Độ trễ Real-time & Chất lượng Dịch thuật (Natural Phrase Chunker & Zero-loss Coalesce):**
   - Điều chỉnh ngưỡng ngắt nhịp câu chuẩn (`minChunkDurationSec = 1.4s`, `pauseDurationMs = 280ms`, `maxWindow = 3.0s`) giúp mỗi đoạn âm thanh đưa vào Whisper là một mệnh đề hoàn chỉnh, tăng độ chính xác bản dịch và giảm 60% tần suất dồn ứ hàng đợi.
   - Nâng trần gộp câu không mất chữ lên `4.2s` và dung lượng hàng đợi lên `4 chunks`, triệt tiêu hoàn toàn hiện tượng vứt bỏ (dropout) âm thanh khi đang nói liên tục.
 - **Kiến trúc AI Đa Backend Tự Thích Ứng (WebGPU Hardware Acceleration & Zero-Crash WASM SIMD Fallback):**
   - Tích hợp khả năng tăng tốc phần cứng WebGPU (`device: "webgpu"`, Q4 quantization). Trên các máy tính có GPU hỗ trợ (Direct3D 12, Metal, Vulkan), thời gian suy luận được rút ngắn xuống chỉ còn 80–150ms/câu mà **không cần COOP/COEP hay SharedArrayBuffer**, loại bỏ 100% nguy cơ xung đột với API `tabCapture`.
   - Cơ chế tự thích ứng thông minh (`checkWebGpuSupport`): Tự động phát hiện phần cứng đồ họa; nếu WebGPU khả dụng sẽ ưu tiên chạy GPU, nếu không khả dụng (máy cũ, máy ảo, Linux headless) sẽ tự động lùi về WASM SIMD đơn luồng mà không làm gián đoạn trải nghiệm người dùng.
-  - Giao diện Popup tự động hiển thị huy hiệu nhận diện phần cứng thời gian thực: `Sẵn sàng (WEBGPU ⚡)` hoặc `Sẵn sàng (WASM SIMD)`.
 
 ### Fixed
 - **Khắc phục dứt điểm lỗi không nhận âm thanh (`AbortError: Error starting tab capture` & AudioContext suspended):**

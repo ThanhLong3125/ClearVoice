@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ClearVoice",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Local-first browser tab audio capture, streaming processing, and AI transcription.",
   "permissions": [
     "tabCapture",

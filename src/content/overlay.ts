@@ -8,48 +8,6 @@ let currLineBox: HTMLDivElement | null = null;
 let hideTimer: number | null = null;
 let lastFinalText: string = "";
 
-let liveBadge: HTMLDivElement | null = null;
-let badgeVolumeLevel: HTMLDivElement | null = null;
-
-function ensureBadgeDOM(): void {
-  if (liveBadge) return;
-
-  liveBadge = document.createElement("div");
-  liveBadge.className = "clearvoice-live-badge";
-  liveBadge.style.display = "none";
-
-  const dot = document.createElement("div");
-  dot.className = "indicator-dot";
-
-  const label = document.createElement("span");
-  label.textContent = "ClearVoice Audio";
-
-  const track = document.createElement("div");
-  track.className = "volume-track";
-
-  badgeVolumeLevel = document.createElement("div");
-  badgeVolumeLevel.className = "volume-level";
-  track.appendChild(badgeVolumeLevel);
-
-  liveBadge.appendChild(dot);
-  liveBadge.appendChild(label);
-  liveBadge.appendChild(track);
-
-  document.body.appendChild(liveBadge);
-}
-
-function updateBadgeVolume(volume: number): void {
-  ensureBadgeDOM();
-  if (!liveBadge || !badgeVolumeLevel) return;
-
-  if (volume > 0) {
-    liveBadge.style.display = "flex";
-    badgeVolumeLevel.style.width = `${volume}%`;
-  } else {
-    badgeVolumeLevel.style.width = "0%";
-  }
-}
-
 function ensureOverlayDOM(): void {
   if (overlayContainer) return;
 
@@ -114,12 +72,10 @@ if (!globalOverlayState.__clearVoiceOverlayLoaded) {
   chrome.runtime.onMessage.addListener((message: ExtensionMessage) => {
     if (message.type === "TRANSCRIPT_UPDATE") {
       displaySubtitle(message.segment.text, message.segment.status);
-    } else if (message.type === "AUDIO_VOLUME") {
-      updateBadgeVolume(message.volume);
     } else if (message.type === "STATUS_UPDATE") {
       if (message.state === "idle" || message.state === "error") {
-        if (liveBadge) {
-          liveBadge.style.display = "none";
+        if (overlayContainer) {
+          overlayContainer.style.display = "none";
         }
       }
     }

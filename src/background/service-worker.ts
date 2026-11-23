@@ -179,10 +179,7 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendRe
       break;
 
     case MessageType.AUDIO_VOLUME:
-      // Broadcast live volume to active tab's overlay
-      if (activeTabId) {
-        chrome.tabs.sendMessage(activeTabId, message).catch(() => {});
-      }
+      // Live volume bar has been removed from tab overlay to avoid blocking user tasks
       break;
 
     case MessageType.TRANSCRIPT_UPDATE:
