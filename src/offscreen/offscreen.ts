@@ -53,6 +53,13 @@ function ensureAsrWorker(): void {
           status: "error",
           error: msg.error,
         }).catch(() => {});
+      } else if (msg.type === "PARTIAL") {
+        if (msg.segment && msg.segment.text) {
+          chrome.runtime.sendMessage<ExtensionMessage>({
+            type: MessageType.TRANSCRIPT_UPDATE,
+            segment: msg.segment,
+          }).catch(() => {});
+        }
       } else if (msg.type === "RESULT") {
         const resolver = pendingRequests.get(msg.requestId);
         if (resolver) {
@@ -112,7 +119,7 @@ async function runAsrConsumerLoop(): Promise<void> {
         continue;
       }
     }
-    await new Promise((resolve) => setTimeout(resolve, 120));
+    await new Promise((resolve) => setTimeout(resolve, 30));
   }
   console.log("[ClearVoice Offscreen] ASR Consumer Loop stopped.");
 }
@@ -198,8 +205,8 @@ async function handleInitAudioCapture(streamId: string, sessionId: string): Prom
     pipeline = new AudioPipeline(sessionId, {
       sourceSampleRate: audioContext.sampleRate,
       targetSampleRate: 16000,
-      windowDurationSec: 3.2,
-      hopDurationSec: 3.2,
+      windowDurationSec: 2.0,
+      hopDurationSec: 2.0,
       maxQueueCapacity: 2,
       onChunkReady: (chunk) => {
         console.log(

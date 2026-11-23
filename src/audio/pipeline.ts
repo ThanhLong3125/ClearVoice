@@ -34,7 +34,7 @@ export class AudioPipeline {
 
   constructor(sessionId: string, config: AudioPipelineConfig) {
     this.targetSampleRate = config.targetSampleRate;
-    this.maxCoalescedSamples = Math.round(3.5 * config.targetSampleRate);
+    this.maxCoalescedSamples = Math.round(2.2 * config.targetSampleRate);
     this.resampler = new StreamResampler(config.sourceSampleRate, config.targetSampleRate);
 
     const chunkerConfig: SlidingWindowConfig = {

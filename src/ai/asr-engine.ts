@@ -3,6 +3,7 @@ import {
   env,
   LogitsProcessor,
   LogitsProcessorList,
+  WhisperTextStreamer,
   type AutomaticSpeechRecognitionPipeline,
 } from "@huggingface/transformers";
 import type { AudioChunk, TranscriptSegment } from "../types/audio";
@@ -247,9 +248,13 @@ export class LocalAsrEngine {
   }
 
   /**
-   * Run ASR inference on a single 16kHz mono AudioChunk with automatic language detection.
+   * Run ASR inference on a single 16kHz mono AudioChunk with automatic language detection
+   * and real-time token-by-token streaming via WhisperTextStreamer.
    */
-  public async transcribe(chunk: AudioChunk): Promise<TranscriptSegment | null> {
+  public async transcribe(
+    chunk: AudioChunk,
+    onPartial?: (segment: TranscriptSegment) => void
+  ): Promise<TranscriptSegment | null> {
     if (!this.transcriber || !this.isReady()) {
       console.warn("[ClearVoice AI] Transcribe called before model is ready.");
       return null;
@@ -264,10 +269,13 @@ export class LocalAsrEngine {
 
     try {
       const startTime = performance.now();
+      const startMs = Math.round((chunk.startSample / chunk.sampleRate) * 1000);
+      const endMs = Math.round(((chunk.startSample + chunk.samples.length) / chunk.sampleRate) * 1000);
+      const segId = `seg_${chunk.sessionId}_${chunk.sequence}`;
 
       const options: Record<string, unknown> = {
         return_timestamps: false,
-        max_new_tokens: 64,
+        max_new_tokens: 40,
       };
 
       if (this.autoLangProcessorList) {
@@ -275,6 +283,43 @@ export class LocalAsrEngine {
         options.logits_processor = this.autoLangProcessorList;
       } else {
         options.task = "transcribe";
+      }
+
+      // Attach WhisperTextStreamer to emit partial words immediately as each token is decoded (~40-60ms/token)
+      const tokenizer = (this.transcriber as unknown as { tokenizer?: unknown }).tokenizer;
+      let streamedRaw = "";
+      let lastPartialText = "";
+
+      if (onPartial && tokenizer) {
+        try {
+          const streamer = new WhisperTextStreamer(
+            tokenizer as ConstructorParameters<typeof WhisperTextStreamer>[0],
+            {
+              skip_prompt: true,
+              skip_special_tokens: true,
+              callback_function: (piece: string) => {
+                streamedRaw += piece;
+                const partialClean = this.cleanHallucinatedText(streamedRaw);
+                if (partialClean && partialClean !== lastPartialText) {
+                  lastPartialText = partialClean;
+                  onPartial({
+                    id: segId,
+                    sessionId: chunk.sessionId,
+                    startMs,
+                    endMs,
+                    text: partialClean,
+                    status: "partial",
+                    sourceSequenceStart: chunk.sequence,
+                    sourceSequenceEnd: chunk.sequence,
+                  });
+                }
+              },
+            }
+          );
+          options.streamer = streamer;
+        } catch {
+          // Fallback to batch mode if streamer construction fails
+        }
       }
 
       const output = (await this.transcriber(chunk.samples, options)) as
@@ -303,11 +348,8 @@ export class LocalAsrEngine {
         `[ClearVoice AI] Inference done in ${inferenceDuration}ms (${this.activeDevice}): "${text}"`
       );
 
-      const startMs = Math.round((chunk.startSample / chunk.sampleRate) * 1000);
-      const endMs = Math.round(((chunk.startSample + chunk.samples.length) / chunk.sampleRate) * 1000);
-
       return {
-        id: `seg_${chunk.sessionId}_${chunk.sequence}`,
+        id: segId,
         sessionId: chunk.sessionId,
         startMs,
         endMs,

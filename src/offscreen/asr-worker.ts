@@ -9,6 +9,7 @@ export type WorkerOutMessage =
   | { type: "PROGRESS"; progress: AsrProgress }
   | { type: "READY"; device: string }
   | { type: "ERROR"; error: string }
+  | { type: "PARTIAL"; requestId: number; segment: TranscriptSegment }
   | { type: "RESULT"; requestId: number; segment: TranscriptSegment | null };
 
 const engine = new LocalAsrEngine();
@@ -38,7 +39,13 @@ self.onmessage = async (event: MessageEvent<WorkerInMessage>) => {
     }
   } else if (msg.type === "TRANSCRIBE") {
     try {
-      const segment = await engine.transcribe(msg.chunk);
+      const segment = await engine.transcribe(msg.chunk, (partialSegment) => {
+        self.postMessage({
+          type: "PARTIAL",
+          requestId: msg.requestId,
+          segment: partialSegment,
+        } satisfies WorkerOutMessage);
+      });
       self.postMessage({
         type: "RESULT",
         requestId: msg.requestId,
